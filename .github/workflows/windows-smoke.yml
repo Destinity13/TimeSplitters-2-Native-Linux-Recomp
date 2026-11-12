@@ -1,0 +1,81 @@
+name: windows-smoke
+# Rauchtest auf echtem Windows (ohne Spiel, ohne ISO): ts2-server mit MSVC bauen und ansprechen,
+# die Bridge-DLL aus dem letzten windows-bridge-Lauf laden (alle Abhaengigkeiten aufloesbar?) und ihre Exporte pruefen.
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [windows-bridge]
+    types: [completed]
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/windows-smoke.yml']
+jobs:
+  smoke:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: ts2-server mit MSVC bauen
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VS=%%i
+          call "%VS%\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /EHsc /O2 /std:c++17 /W3 /Fe:ts2-server.exe server\ts2_server.cpp ws2_32.lib
+      - name: ts2-server ansprechen (Abfrage, Reflexionsdeckel, Flut, Normaltempo)
+        shell: bash
+        run: |
+          ./ts2-server.exe --port 27713 --name CI > server.log 2>&1 &
+          sleep 2
+          python - <<'PY'
+          import socket,struct,time,sys
+          u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); u.settimeout(1)
+          u.sendto(b"T2IN\x01\x02\x03\x04",("127.0.0.1",27713)); r=u.recvfrom(2048)[0]
+          proto,n,mx=struct.unpack_from("<HHH",r,8); assert r[:4]==b"T2IN" and proto==1 and n==0 and mx==16, r
+          print("query ok", r[15:])
+          got=0
+          for i in range(100): u.sendto(b"T2IN"+bytes([i,0,0,0]),("127.0.0.1",27713))
+          t=time.time()
+          while time.time()-t<0.8:
+              try: u.recvfrom(2048); got+=1
+              except socket.timeout: break
+          assert got<=80, got; print("reflection capped:",got)
+          def hello(name):
+              c=socket.create_connection(("127.0.0.1",27713)); body=bytes([1])+struct.pack("<H",1)+name+b"\x00"
+              c.sendall(struct.pack("<I",len(body))+body); ln=struct.unpack("<I",c.recv(4))[0]; m=c.recv(ln); assert m[0]==2, m; return c,m
+          a,ma=hello(b"A"); b,mb=hello(b"B"); vipb=struct.unpack_from("<I",mb,1)[0]
+          pkt=bytes([10])+struct.pack("<HIH",5000,vipb,5000)+b"x"*100; fr=struct.pack("<I",len(pkt))+pkt
+          try:
+              for i in range(40000): a.sendall(fr)
+              sys.exit("flood not disconnected")
+          except OSError as e: print("flood kicked:",type(e).__name__)
+          c,mc=hello(b"C"); vipc=struct.unpack_from("<I",mc,1)[0]
+          pkt=bytes([10])+struct.pack("<HIH",5000,vipc,5000)+b"y"*200; fr=struct.pack("<I",len(pkt))+pkt
+          for s in range(3):
+              for i in range(120): b.sendall(fr)
+              time.sleep(1)
+          print("normal rate ok")
+          PY
+          cat server.log
+      - name: Bridge-DLL des letzten windows-bridge-Laufs holen
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(gh run list -w windows-bridge -b main -s success -L 1 --json databaseId -q '.[0].databaseId')
+          echo "windows-bridge run $RUN"
+          gh run download "$RUN" -n ps2xgs-windows -D bridge
+          ls bridge
+      - name: Bridge-DLL laden und Exporte pruefen (echtes Windows, sauberer Runner)
+        shell: python
+        run: |
+          import ctypes, os, sys
+          d = os.path.abspath('bridge')
+          os.add_dll_directory(d)
+          os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
+          lib = ctypes.WinDLL(os.path.join(d, 'libps2xgs.dll'))
+          soll = ('ps2xgs_start', 'ps2xgs_stop', 'ps2xgs_transfer', 'ps2xgs_vsync', 'ps2xgs_pad', 'ps2xgs_mouse', 'ps2xgs_option', 'ps2xgs_screenshot', 'ps2xgs_online_browser')
+          fehlt = [s for s in soll if not hasattr(lib, s)]
+          print('exports found:', [s for s in soll if hasattr(lib, s)])
+          if fehlt:
+              sys.exit('bridge exports missing: ' + ', '.join(fehlt))
+          print('libps2xgs.dll loads on a clean Windows runner')

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="736" viewBox="0 0 1200 736" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="1200" height="736" rx="16" fill="#0d1117"/>
+<rect x="1" y="1" width="1198" height="734" rx="15" fill="none" stroke="#30363d"/>
+<text x="40" y="58" fill="#f0f6fc" font-size="30" font-weight="700">Project status · 1.0.1</text>
+<text x="40" y="88" fill="#8b949e" font-size="16">TimeSplitters 2 (NTSC-U) native PC port · Windows · Linux · Steam Deck</text>
+<text x="40" y="108" fill="#6e7681" font-size="14">runtime build pc143 · 11 November 2026</text>
+<text x="1160" y="58" fill="#3fb950" font-size="30" font-weight="700" text-anchor="end">59.9 FPS</text>
+<text x="1160" y="88" fill="#8b949e" font-size="16" text-anchor="end">in game · menus · split-screen · recording</text>
+<rect x="20" y="124" width="1160" height="44" rx="8" fill="#161b22"/>
+<text x="40" y="154" fill="#e6edf3" font-size="17" font-weight="600">CPU code (EE + VU0)</text>
+<rect x="320" y="141" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="141" width="240" height="14" rx="7" fill="#3fb950"/>
+<text x="574" y="154" fill="#3fb950" font-size="17" font-weight="700">100 %</text>
+<text x="636" y="154" fill="#8b949e" font-size="14">statically recompiled to C++, exact EE-FPU, libm as original code</text>
+<text x="40" y="200" fill="#e6edf3" font-size="17" font-weight="600">VU1 microcode</text>
+<rect x="320" y="187" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="187" width="240" height="14" rx="7" fill="#3fb950"/>
+<text x="574" y="200" fill="#3fb950" font-size="17" font-weight="700">100 %</text>
+<text x="636" y="200" fill="#8b949e" font-size="14">all entry points compiled, pixel-identical to the interpreter</text>
+<rect x="20" y="216" width="1160" height="44" rx="8" fill="#161b22"/>
+<text x="40" y="246" fill="#e6edf3" font-size="17" font-weight="600">Graphics output</text>
+<rect x="320" y="233" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="233" width="230" height="14" rx="7" fill="#3fb950"/>
+<text x="574" y="246" fill="#3fb950" font-size="17" font-weight="700">96 %</text>
+<text x="636" y="246" fill="#8b949e" font-size="14">PCSX2 GS (Vulkan / D3D11), 1×–8×, real 16:9 with HUD at the edges</text>
+<text x="40" y="292" fill="#e6edf3" font-size="17" font-weight="600">Frame rate</text>
+<rect x="320" y="279" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="279" width="237" height="14" rx="7" fill="#3fb950"/>
+<text x="574" y="292" fill="#3fb950" font-size="17" font-weight="700">99 %</text>
+<text x="636" y="292" fill="#8b949e" font-size="14">59.9 FPS in game, menus, split-screen, while recording at 1080p</text>
+<rect x="20" y="308" width="1160" height="44" rx="8" fill="#161b22"/>
+<text x="40" y="338" fill="#e6edf3" font-size="17" font-weight="600">Platforms</text>
+<rect x="320" y="325" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="325" width="235" height="14" rx="7" fill="#3fb950"/>
+<text x="574" y="338" fill="#3fb950" font-size="17" font-weight="700">98 %</text>
+<text x="636" y="338" fill="#8b949e" font-size="14">Windows 10/11, Linux, Steam Deck released; Windows played on a real PC</text>
+<text x="40" y="384" fill="#e6edf3" font-size="17" font-weight="600">Story content</text>
+<rect x="320" y="371" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="371" width="204" height="14" rx="7" fill="#d29922"/>
+<text x="574" y="384" fill="#d29922" font-size="17" font-weight="700">85 %</text>
+<text x="636" y="384" fill="#8b949e" font-size="14">all 10 levels play in automated runs; Siberia by hand, levels 2–10 by hand open</text>
+<rect x="20" y="400" width="1160" height="44" rx="8" fill="#161b22"/>
+<text x="40" y="430" fill="#e6edf3" font-size="17" font-weight="600">Arcade · Challenge · MapMaker</text>
+<rect x="320" y="417" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="417" width="204" height="14" rx="7" fill="#d29922"/>
+<text x="574" y="430" fill="#d29922" font-size="17" font-weight="700">85 %</text>
+<text x="636" y="430" fill="#8b949e" font-size="14">League, Challenge, MapMaker, co-op; Arcade Custom + multitap 3–4 untested</text>
+<text x="40" y="476" fill="#e6edf3" font-size="17" font-weight="600">Online multiplayer</text>
+<rect x="320" y="463" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="463" width="168" height="14" rx="7" fill="#f0883e"/>
+<text x="574" y="476" fill="#f0883e" font-size="17" font-weight="700">70 %</text>
+<text x="636" y="476" fill="#8b949e" font-size="14">ts2-server, server browser, 2-player LAN match; internet latency untested</text>
+<rect x="20" y="492" width="1160" height="44" rx="8" fill="#161b22"/>
+<text x="40" y="522" fill="#e6edf3" font-size="17" font-weight="600">Input</text>
+<rect x="320" y="509" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="509" width="204" height="14" rx="7" fill="#d29922"/>
+<text x="574" y="522" fill="#d29922" font-size="17" font-weight="700">85 %</text>
+<text x="636" y="522" fill="#8b949e" font-size="14">gamepads, mouse look with original crosshair, free binding; aim-mode walk speed open</text>
+<text x="40" y="568" fill="#e6edf3" font-size="17" font-weight="600">Saving · sound</text>
+<rect x="320" y="555" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="555" width="228" height="14" rx="7" fill="#3fb950"/>
+<text x="574" y="568" fill="#3fb950" font-size="17" font-weight="700">95 %</text>
+<text x="636" y="568" fill="#8b949e" font-size="14">memory card saves and backups; SPU2 at 48 kHz, streams and sound banks</text>
+<rect x="20" y="584" width="1160" height="44" rx="8" fill="#161b22"/>
+<text x="40" y="614" fill="#e6edf3" font-size="17" font-weight="600">Original code instead of HLE</text>
+<rect x="320" y="601" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="601" width="204" height="14" rx="7" fill="#d29922"/>
+<text x="574" y="614" fill="#d29922" font-size="17" font-weight="700">85 %</text>
+<text x="636" y="614" fill="#8b949e" font-size="14">65 of 198 stubs used; libc, DMA, GS path original; host I/O HLE</text>
+<text x="40" y="660" fill="#e6edf3" font-size="17" font-weight="600">Extras</text>
+<rect x="320" y="647" width="240" height="14" rx="7" fill="#21262d"/>
+<rect x="320" y="647" width="216" height="14" rx="7" fill="#d29922"/>
+<text x="574" y="660" fill="#d29922" font-size="17" font-weight="700">90 %</text>
+<text x="636" y="660" fill="#8b949e" font-size="14">settings menu (EN/DE), texture packs, filters, F8 recording, F7 free camera, 16:9 HUD</text>
+<text x="40" y="710" fill="#6e7681" font-size="14">Rough estimates by the maintainers. Green: done and verified against PCSX2 · amber: works, not fully verified · orange: in progress.</text>
+</svg>

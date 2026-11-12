@@ -1,0 +1,34 @@
+# systemd unit for ts2-server (hardened): copy to /etc/systemd/system/, put ts2-server into /opt/ts2-server/,
+# then: systemctl enable --now ts2-server
+[Unit]
+Description=TimeSplitters 2 Native online server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/ts2-server/ts2-server --port 27713 --name "My server" --max 16
+Restart=always
+RestartSec=3
+# no privileges, no home, no writable filesystem, no other processes visible
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+MemoryMax=256M
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

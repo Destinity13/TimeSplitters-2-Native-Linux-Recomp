@@ -1,0 +1,117 @@
+name: linux-bridge
+# Baut die GS/SPU2-Bridge (PCSX2 + ps2x-gsbridge) fuer das Linux-Release auf Ubuntu 22.04 (glibc 2.35):
+# laeuft damit auf SteamOS und allen aktuellen Distributionen. Ohne -march=native (DISABLE_ADVANCE_SIMD).
+# Kein Spielcode, keine Spieldaten: nur PCSX2 (GPL-3.0) mit dem Patch aus gsbridge/.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['gsbridge/**', '.github/workflows/linux-bridge.yml']
+jobs:
+  bridge:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: PCSX2 holen und patchen
+        run: |
+          C=$(cat gsbridge/PCSX2_COMMIT)
+          mkdir pcsx2 && cd pcsx2 && git init -q && git remote add origin https://github.com/PCSX2/pcsx2
+          git fetch -q --depth 1 origin "$C" && git checkout -q FETCH_HEAD
+          git apply --whitespace=nowarn ../gsbridge/pcsx2_ps2x.patch
+          rm -rf ps2x-gsbridge && cp -r ../gsbridge/ps2x-gsbridge ps2x-gsbridge
+      - name: Pakete
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo apt-add-repository -n 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main'
+          sudo apt-get update -q
+          sudo apt-get -y -q install build-essential clang-17 lld-17 llvm-17 cmake curl extra-cmake-modules git libaio-dev \
+            libasound2-dev libcurl4-openssl-dev libdbus-1-dev libegl-dev libevdev-dev libfontconfig-dev libfreetype-dev \
+            libharfbuzz-dev libopengl-dev libpcap-dev libpulse-dev libssl-dev libudev-dev libwayland-dev libx11-dev \
+            libx11-xcb-dev libxcb1-dev libxext-dev libxkbcommon-x11-dev libxrandr-dev libxi-dev nasm ninja-build patchelf \
+            pkg-config zlib1g-dev
+      - name: Abhaengigkeiten (Cache)
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: ~/deps
+          key: ps2x-linux-deps-${{ hashFiles('pcsx2/.github/workflows/scripts/linux/build-dependencies-runner.sh') }}
+      - name: Abhaengigkeiten laden (einzeln, mit Wiederholung)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          cd pcsx2; S=.github/workflows/scripts/linux/build-dependencies-runner.sh
+          mkdir -p deps-build
+          eval "$(grep -E '^[A-Z0-9_]+=' "$S")"
+          grep -oE -- '-O "[^"]+"' "$S" | sed 's/^-O "//; s/"$//' | while read -r u; do
+            u=$(eval echo "$u"); f="deps-build/$(basename "$u")"
+            for n in 1 2 3 4 5; do
+              curl --http1.1 -fsSL --retry 5 --retry-all-errors --connect-timeout 30 -o "$f" "$u" && break
+              echo "Download $n fehlgeschlagen: $u"; sleep 15
+            done
+            [ -s "$f" ] || { echo "FEHLT: $u"; exit 1; }; ls -la "$f"
+          done
+      - name: Abhaengigkeiten bauen
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        env:
+          CC: clang-17
+          CXX: clang++-17
+        run: cd pcsx2 && .github/workflows/scripts/linux/build-dependencies-runner.sh "$HOME/deps"
+      - name: FFmpeg 8.1 (Cache)
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffm
+          key: ps2x-linux-ffmpeg-8.1-x264-v1
+      - name: FFmpeg 8.1 bauen (minimal, fuer die Videoaufnahme F8; libavcodec 62 wie PCSX2s Header)
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get -y -q install libx264-dev
+          curl -fsSL --retry 5 -o ffmpeg-8.1.tar.xz https://ffmpeg.org/releases/ffmpeg-8.1.tar.xz
+          echo "b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a  ffmpeg-8.1.tar.xz" | sha256sum -c -
+          tar xf ffmpeg-8.1.tar.xz && cd ffmpeg-8.1
+          ./configure --prefix="$HOME/ffm" --disable-all --disable-autodetect --disable-static --enable-shared \
+            --enable-avcodec --enable-avformat --enable-avutil --enable-swresample --enable-swscale \
+            --enable-gpl --enable-libx264 --enable-encoder=libx264*,aac,pcm_s16le --enable-muxer=mp4,matroska,wav --enable-protocol=file > ../ffmpeg-configure.log 2>&1 || { tail -20 ../ffmpeg-configure.log; exit 1; }
+          make -j"$(nproc)" > ../ffmpeg-make.log 2>&1 || { tail -20 ../ffmpeg-make.log; exit 1; }
+          make install > /dev/null
+          cp -L /usr/lib/x86_64-linux-gnu/libx264.so.* "$HOME/ffm/lib/"
+      - name: libps2xgs.so bauen
+        run: |
+          cd pcsx2
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/deps" \
+            -DCMAKE_C_COMPILER=clang-17 -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_EXE_LINKER_FLAGS_INIT="-fuse-ld=lld" -DCMAKE_MODULE_LINKER_FLAGS_INIT="-fuse-ld=lld" -DCMAKE_SHARED_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_TESTS=OFF -DENABLE_SETCAP=OFF -DDISABLE_ADVANCE_SIMD=ON \
+            -DUSE_LINKED_FFMPEG=OFF -DCMAKE_DISABLE_FIND_PACKAGE_FFMPEG=ON -DWAYLAND_API=OFF -DUSE_VULKAN=ON -DUSE_OPENGL=ON \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON > ../cmake.log 2>&1 || { tail -40 ../cmake.log; exit 1; }
+          ninja -C build ps2xgs > ../bau.log 2>&1 || { grep -E "error|FAILED" ../bau.log | head -40; exit 1; }
+      - name: Paketieren und pruefen
+        run: |
+          O=out/gs; mkdir -p $O
+          L=$(find pcsx2/build -name 'libps2xgs.so' | head -1); cp "$L" $O/
+          cp -rL pcsx2/bin/resources $O/resources
+          # nicht ueberall vorhandene Bibliotheken aus ~/deps mitnehmen (rekursiv)
+          for i in 1 2 3; do
+            for f in $O/*.so*; do
+              ldd "$f" | awk '/=> \// {print $3}' | grep "$HOME/deps/lib" | while read -r d; do n=$(basename "$d"); [ -e "$O/$n" ] || cp -L "$d" "$O/$n"; done
+            done
+          done
+          # Ubuntu-Namen, die es auf Arch/SteamOS so nicht gibt (libpcap.so.0.8) bzw. nicht ueberall gibt (libjpeg.so.8)
+          for n in libjpeg.so.8 libpcap.so.0.8; do
+            d=$(ldd $O/libps2xgs.so | awk -v n=$n '$1==n {print $3}'); [ -n "$d" ] && [ ! -e "$O/$n" ] && cp -L "$d" "$O/$n"
+          done
+          # FFmpeg fuer die Videoaufnahme (dlopen aus libps2xgs.so, ueber dessen RUNPATH $ORIGIN gefunden)
+          sudo apt-get -y -q install libx264-dev > /dev/null
+          for f in "$HOME"/ffm/lib/libav*.so.* "$HOME"/ffm/lib/libsw*.so.* "$HOME"/ffm/lib/libx264.so.*; do [ -f "$f" ] && cp -L "$f" "$O/"; done
+          for f in $O/*.so*; do patchelf --set-rpath '$ORIGIN' "$f"; done
+          echo "== Bibliotheken"; ls -la $O
+          echo "== hoechste glibc/libstdc++-Anforderung"
+          for f in $O/*.so*; do echo "$(basename "$f"): $(objdump -T "$f" | grep -oE 'GLIBC_[0-9.]+' | sort -V | uniq | tail -1) $(objdump -T "$f" | grep -oE 'GLIBCXX_[0-9.]+' | sort -V | uniq | tail -1)"; done
+          echo "== AVX-512: $(objdump -d --no-show-raw-insn $O/libps2xgs.so | grep -c zmm)"
+          echo "== ungeloest:"; ldd $O/libps2xgs.so | grep "not found" || echo keine
+          cp cmake.log bau.log out/ 2>/dev/null || true
+          tar -C out -czf ps2xgs-linux-x86_64.tar.gz gs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps2xgs-linux-x86_64
+          path: ps2xgs-linux-x86_64.tar.gz

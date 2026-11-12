@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TimeSplitters 2 Native PC Port – before / after</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #06101f; color: #e6edf3; font: 16px/1.5 system-ui, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header { padding: 28px 24px 8px; max-width: 1200px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; color: #6bdcff; letter-spacing: .02em; }
+  header p { margin: 0; color: #8fa3bd; }
+  main { max-width: 1200px; margin: 0 auto; padding: 8px 24px 48px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; color: #7dff6a; font-weight: 600; }
+  .note { color: #8fa3bd; font-size: 14px; margin: 0 0 10px; }
+  .cmp { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid #2a4a7a; border-radius: 6px; background: #000; user-select: none; touch-action: none; }
+  .cmp img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: block; pointer-events: none; }
+  .cmp .top { clip-path: inset(0 50% 0 0); }
+  .cmp .bar { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #fff; transform: translateX(-1px); box-shadow: 0 0 8px rgba(0,0,0,.8); }
+  .cmp .knob { position: absolute; top: 50%; left: 50%; width: 42px; height: 42px; margin: -21px 0 0 -21px; border-radius: 50%; background: #0b1a33; border: 2px solid #fff; display: grid; place-items: center; font-size: 18px; color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.6); }
+  .cmp .lbl { position: absolute; top: 10px; padding: 4px 10px; background: rgba(0,0,0,.65); border-radius: 4px; font-size: 13px; letter-spacing: .03em; }
+  .cmp .l { left: 10px; } .cmp .r { right: 10px; color: #7dff6a; }
+  input[type=range] { width: 100%; margin: 10px 0 0; accent-color: #6bdcff; }
+  footer { max-width: 1200px; margin: 0 auto; padding: 0 24px 40px; color: #6b7f9a; font-size: 13px; }
+  a { color: #6bdcff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TIMESPLITTERS 2 · Native PC Port</h1>
+  <p>Drag the handle. Left: how the PS2 drew it. Right: the same frame from this port. Same input replay, same game state – only the renderer differs. No AI upscaling, no texture pack.</p>
+</header>
+<main>
+  <h2>Resolution: PS2 (512×448) vs 4× internal</h2>
+  <p class="note">Siberia, the camp. The left side is the same frame box-filtered down to the PS2 output size of 512×448 and shown pixel-for-pixel; the right side is what the port renders by default ("Remaster" preset).</p>
+  <div class="cmp" data-cmp>
+    <img src="res_4x.jpg" alt="4x internal resolution">
+    <img class="top" src="res_ps2.jpg" alt="PS2 resolution">
+    <div class="bar"></div><div class="knob">⇔</div>
+    <span class="lbl l">PS2 resolution</span><span class="lbl r">this port · 4×</span>
+  </div>
+  <input type="range" min="0" max="100" value="50" aria-label="comparison position">
+
+  <h2>Picture: original 4:3 vs real 16:9 (Hor+)</h2>
+  <p class="note">Same frame of the same replay. 16:9 shows more of the scene instead of stretching; HUD and menus stay in proportion.</p>
+  <div class="cmp" data-cmp>
+    <img src="wide_169.jpg" alt="16:9">
+    <img class="top" src="wide_43.jpg" alt="4:3 original">
+    <div class="bar"></div><div class="knob">⇔</div>
+    <span class="lbl l">4:3 original</span><span class="lbl r">this port · 16:9</span>
+  </div>
+  <input type="range" min="0" max="100" value="50" aria-label="comparison position">
+
+  <h2>Second scene</h2>
+  <p class="note">A firefight a few seconds later in the same replay.</p>
+  <div class="cmp" data-cmp>
+    <img src="res2_4x.jpg" alt="4x internal resolution">
+    <img class="top" src="res2_ps2.jpg" alt="PS2 resolution">
+    <div class="bar"></div><div class="knob">⇔</div>
+    <span class="lbl l">PS2 resolution</span><span class="lbl r">this port · 4×</span>
+  </div>
+  <input type="range" min="0" max="100" value="50" aria-label="comparison position">
+</main>
+<footer>Captured from the port's own renderer (PCSX2 GS through the bridge) on the maintainer's disc. <a href="https://github.com/Destinity13/TimeSplitters-2-Native-Linux-Recomp">Back to the project</a>.</footer>
+<script>
+  document.querySelectorAll('[data-cmp]').forEach(function (box) {
+    var top = box.querySelector('.top'), bar = box.querySelector('.bar'), knob = box.querySelector('.knob');
+    var range = box.nextElementSibling;
+    function set(p) {
+      p = Math.max(0, Math.min(100, p));
+      top.style.clipPath = 'inset(0 ' + (100 - p) + '% 0 0)';
+      bar.style.left = knob.style.left = p + '%';
+      range.value = p;
+    }
+    function fromEvent(e) {
+      var r = box.getBoundingClientRect();
+      var x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+      set(x / r.width * 100);
+    }
+    var down = false;
+    box.addEventListener('pointerdown', function (e) { down = true; box.setPointerCapture(e.pointerId); fromEvent(e); });
+    box.addEventListener('pointermove', function (e) { if (down) fromEvent(e); });
+    box.addEventListener('pointerup', function () { down = false; });
+    box.addEventListener('pointercancel', function () { down = false; });
+    range.addEventListener('input', function () { set(+range.value); });
+    set(50);
+  });
+</script>
+</body>
+</html>

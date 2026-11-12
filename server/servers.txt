@@ -1,0 +1,7 @@
+# TimeSplitters 2 Native - community server list
+#
+# The in-game server browser (settings menu ESC/F1 -> Online, or automatically at Arcade -> Network) loads this file
+# and asks every server for its name, players and ping. One server per line: host or host:port (default port 27713),
+# optionally followed by a comment. Running a server that is online most of the time? Open a pull request and add it.
+#
+# host[:port]                     # who runs it, region

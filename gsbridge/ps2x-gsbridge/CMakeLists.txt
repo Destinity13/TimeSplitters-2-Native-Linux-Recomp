@@ -1,0 +1,12 @@
+# ps2x-gsbridge: PCSX2-GS als gemeinsame Bibliothek fuer den nativen Port (nur ps2xgs_* exportiert)
+add_library(ps2xgs SHARED Bridge.cpp)
+target_include_directories(ps2xgs PRIVATE "${CMAKE_BINARY_DIR}/common/include" "${CMAKE_SOURCE_DIR}/pcsx2")
+if(WIN32)
+	# Windows: libps2xgs.dll, Exporte per __declspec(dllexport) (PS2XGS_API), Fenster ueber Win32
+	target_link_libraries(ps2xgs PRIVATE PCSX2_FLAGS PCSX2 SDL3::SDL3)
+	set_target_properties(ps2xgs PROPERTIES PREFIX "lib" OUTPUT_NAME "ps2xgs")
+else()
+	target_link_libraries(ps2xgs PRIVATE PCSX2_FLAGS PCSX2 SDL3::SDL3 X11)
+	set_target_properties(ps2xgs PROPERTIES CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+	target_link_options(ps2xgs PRIVATE "-Wl,--exclude-libs,ALL")
+endif()

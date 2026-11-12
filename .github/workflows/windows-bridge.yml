@@ -1,0 +1,86 @@
+name: windows-bridge
+# Baut die GS/SPU2-Bridge (PCSX2 + ps2x-gsbridge) als libps2xgs.dll fuer den Windows-Port.
+# Kein Spielcode, keine Spieldaten: nur PCSX2 (GPL-3.0) mit dem Patch aus gsbridge/.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['gsbridge/**', '.github/workflows/windows-bridge.yml']
+jobs:
+  bridge:
+    runs-on: windows-2022
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: PCSX2 holen und patchen
+        shell: bash
+        run: |
+          C=$(cat gsbridge/PCSX2_COMMIT)
+          mkdir pcsx2 && cd pcsx2 && git init -q && git remote add origin https://github.com/PCSX2/pcsx2
+          git fetch -q --depth 1 origin "$C" && git checkout -q FETCH_HEAD
+          git apply --whitespace=nowarn ../gsbridge/pcsx2_ps2x.patch
+          rm -rf ps2x-gsbridge && cp -r ../gsbridge/ps2x-gsbridge ps2x-gsbridge
+          cp ../gsbridge/windows/build-dependencies-ps2x.bat .github/workflows/scripts/windows/
+      - name: Abhaengigkeiten (Cache)
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: pcsx2/deps
+          key: ps2x-win-deps-${{ hashFiles('gsbridge/windows/build-dependencies-ps2x.bat') }}
+      - name: Abhaengigkeiten bauen
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        shell: cmd
+        env:
+          BUILD_FFMPEG: 0
+          DEBUG: 0
+        run: pcsx2\.github\workflows\scripts\windows\build-dependencies-ps2x.bat
+      - name: CMake konfigurieren
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VS=%%i
+          call "%VS%\VC\Auxiliary\Build\vcvars64.bat"
+          cd pcsx2
+          cmake . -B build -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl "-DCMAKE_PREFIX_PATH=%cd%\deps" -DCMAKE_BUILD_TYPE=Release -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_TESTS=OFF -DDISABLE_ADVANCE_SIMD=ON -DUSE_LINKED_FFMPEG=OFF -DCMAKE_DISABLE_FIND_PACKAGE_FFMPEG=ON -DUSE_VULKAN=ON -DUSE_OPENGL=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON > ..\cmake.log 2>&1
+          set RC=%ERRORLEVEL%
+          type ..\cmake.log
+          exit /b %RC%
+      - name: libps2xgs.dll bauen
+        shell: cmd
+        continue-on-error: true
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VS=%%i
+          call "%VS%\VC\Auxiliary\Build\vcvars64.bat"
+          cd pcsx2
+          ninja -C build -k 0 ps2xgs > ..\bau.log 2>&1
+          set RC=%ERRORLEVEL%
+          findstr /C:"error" ..\bau.log
+          exit /b %RC%
+      - name: Ergebnis sammeln
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p out
+          cp cmake.log bau.log out/ 2>/dev/null || true
+          find pcsx2/build -name 'libps2xgs.dll' -exec cp {} out/ \; 2>/dev/null || true
+          cp pcsx2/deps/bin/*.dll out/ 2>/dev/null || true
+          # Visual-C++-Laufzeit beilegen (MSVCP140/VCRUNTIME140), damit nichts nachinstalliert werden muss
+          for d in "/c/Program Files/Microsoft Visual Studio/2022/"*/VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT; do cp "$d"/*.dll out/ 2>/dev/null && echo "VC-Laufzeit aus $d"; done
+          ls -la out
+      - name: FFmpeg 8 DLLs fuer die Videoaufnahme (BtbN-Build, GPL, libavcodec 62)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ffm && cd ffm
+          gh release download -R BtbN/FFmpeg-Builds latest -p 'ffmpeg-n8.*win64-gpl-shared-8.*.zip' -D . || gh release download -R BtbN/FFmpeg-Builds latest -p '*win64-gpl-shared-8.*.zip' -D .
+          ls -la
+          unzip -qo *.zip
+          D=$(find . -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)
+          mkdir -p ../out/ffmpeg   # eigener Unterordner, nicht im DLL-Suchpfad (die Bridge laedt sie mit vollem Pfad)
+          for n in avcodec-62 avformat-62 avutil-60 swresample-6 swscale-9; do cp "$D/bin/$n.dll" ../out/ffmpeg/ && echo "$n.dll"; done
+          cp "$D/LICENSE.txt" ../out/ffmpeg/FFMPEG-LICENSE.txt 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ps2xgs-windows
+          path: out

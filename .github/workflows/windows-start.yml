@@ -1,0 +1,70 @@
+name: windows-start
+# Startet die Bridge-DLL des letzten windows-bridge-Laufs auf echtem Windows (wie das Spiel es tut: ps2xgs_start mit
+# Fenster und Startmenue), einmal frisch und einmal mit einer alten Einstellungsdatei, unter dem Debugger (cdb):
+# stuerzt sie ab, steht das Modul und der Aufrufstapel im Log.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/windows-start.yml']
+jobs:
+  start:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Bridge-DLL holen
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(gh run list -R "$GITHUB_REPOSITORY" -w windows-bridge -b main -s success -L 1 --json databaseId -q '.[0].databaseId')
+          echo "windows-bridge run $RUN"
+          gh run download -R "$GITHUB_REPOSITORY" "$RUN" -n ps2xgs-windows -D gs
+          ls gs | head -50
+      - name: Startskript
+        shell: bash
+        run: |
+          cat > start.py <<'PY'
+          import ctypes, os, sys, time
+          d = os.path.abspath('gs')
+          os.add_dll_directory(d)
+          os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
+          lib = ctypes.WinDLL(os.path.join(d, 'libps2xgs.dll'))
+          live = os.path.abspath('live.gs'); open(live, 'ab').close()
+          lib.ps2xgs_start.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_float, ctypes.c_int]
+          lib.ps2xgs_start.restype = ctypes.c_int
+          r = int(sys.argv[1]) if len(sys.argv) > 1 else 14
+          print('ps2xgs_start renderer', r, flush=True)
+          ok = lib.ps2xgs_start(live.encode(), r, 3.0, 1)
+          print('ps2xgs_start ->', ok, flush=True)
+          regs = (ctypes.c_ubyte * 0x2000)()
+          lib.ps2xgs_vsync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+          for i in range(300):
+              lib.ps2xgs_vsync(regs, i & 1); time.sleep(0.016)
+          print('300 vsyncs ok', flush=True)
+          os._exit(0)
+          PY
+      - name: Start unter cdb (Renderer 14 Vulkan, 13 Software), frisch und mit alter Einstellungsdatei
+        shell: pwsh
+        run: |
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          if (-not (Test-Path $cdb)) { Write-Host "cdb fehlt"; $cdb = $null }
+          $env:PS2XGS_APPROOT = (Resolve-Path gs).Path
+          $env:PS2XGS_SERIAL = 'SLUS-20314'; $env:PS2XGS_CRC = '0'; $env:PS2XGS_TITEL = 'TIMESPLITTERS 2'; $env:PS2XGS_CFGNAME = 'ts2-recomp'
+          $env:PS2XGS_ONLINE = '1'; $env:PS2X_PCSX2_WIDESCREEN = '1'
+          $cfg = Join-Path $env:APPDATA 'ts2-recomp'
+          $py = (Get-Command python).Source
+          foreach ($fall in 'frisch', 'alt') {
+            Remove-Item -Recurse -Force $cfg -ErrorAction SilentlyContinue
+            if ($fall -eq 'alt') {
+              New-Item -ItemType Directory -Force $cfg | Out-Null
+              "# ts2-recomp`naufloesung=3`nbildformat=0`nstartmenue=1`nmaus_zielen=1`nmaus_empfindlichkeit=30`nmaus_zielmodus=1`nzoom_empfindlichkeit=50`ntaste_0=119,0`ntaste_4=268435457,0`ntexturpakete=`nonline_server=`nonline_name=`n" | Set-Content (Join-Path $cfg 'einstellungen.ini') -NoNewline
+            }
+            foreach ($r in 14, 13) {
+              Write-Host "===== Fall $fall, Renderer $r ====="
+              if ($cdb) { & $cdb -g -G -c ".lastevent; kb 40; lm m libps2xgs; q" $py start.py $r 2>&1 | Select-Object -Last 120 }
+              else { & $py start.py $r }
+              Write-Host "Exitcode: $LASTEXITCODE"
+            }
+          }
+          exit 0

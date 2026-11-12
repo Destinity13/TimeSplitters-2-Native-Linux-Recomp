@@ -1,0 +1,771 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b0c3945..8aa2b83 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -63,6 +63,9 @@ if(ENABLE_TESTS)
+ 	add_subdirectory(tests/ctest)
+ endif()
+ 
++# ps2x: GS-Bibliothek fuer den nativen Port
++add_subdirectory(ps2x-gsbridge)
++
+ # gsrunner
+ if(ENABLE_GSRUNNER)
+ 	add_subdirectory(pcsx2-gsrunner)
+diff --git a/common/AlignedMalloc.cpp b/common/AlignedMalloc.cpp
+index f05e04d..05895d5 100644
+--- a/common/AlignedMalloc.cpp
++++ b/common/AlignedMalloc.cpp
+@@ -16,7 +16,7 @@ void* _aligned_malloc(size_t size, size_t align)
+ {
+ 	pxAssert(align < 0x10000);
+ #if defined(__USE_ISOC11) && !defined(ASAN_WORKAROUND) // not supported yet on gcc 4.9
+-	return aligned_alloc(align, size);
++	return aligned_alloc(align, (size + align - 1) & ~(align - 1)); // ps2x: C11 verlangt Vielfaches der Ausrichtung
+ #else
+ #ifdef __APPLE__
+ 	// MacOS has a bug where posix_memalign is ridiculously slow on unaligned sizes
+diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
+index 8291c3b..4095d48 100644
+--- a/pcsx2/GS/GS.cpp
++++ b/pcsx2/GS/GS.cpp
+@@ -436,6 +436,18 @@ void GSgifTransfer3(u8* mem, u32 size)
+ 	g_gs_renderer->Transfer<2>(const_cast<u8*>(mem), size);
+ }
+ 
++void GSgifTransferLive(u32 path, const u8* mem, u32 size)
++{
++	// ps2x live: Pakete kommen pfadweise und koennen mitten in einer GIFtag-Schleife enden.
++	// Jeder Pfad bekommt deshalb seinen eigenen GIFPath-Zustand (wie auf echter Hardware).
++	switch (path)
++	{
++		case 1: g_gs_renderer->Transfer<1>(mem, size); break;
++		case 2: g_gs_renderer->Transfer<2>(mem, size); break;
++		default: g_gs_renderer->Transfer<3>(mem, size); break;
++	}
++}
++
+ void GSvsync(u32 field, bool registers_written)
+ {
+ 	// Update this here because we need to check if the pending draw affects the current frame, so our regs need to be updated.
+diff --git a/pcsx2/GS/GS.h b/pcsx2/GS/GS.h
+index 892f406..864878d 100644
+--- a/pcsx2/GS/GS.h
++++ b/pcsx2/GS/GS.h
+@@ -70,6 +70,7 @@ void GSgifTransfer(const u8* mem, u32 size);
+ void GSgifTransfer1(u8* mem, u32 addr);
+ void GSgifTransfer2(u8* mem, u32 size);
+ void GSgifTransfer3(u8* mem, u32 size);
++void GSgifTransferLive(u32 path, const u8* mem, u32 size); // ps2x: eigener Pfadzustand je GIF-Pfad
+ void GSvsync(u32 field, bool registers_written);
+ int GSfreeze(FreezeAction mode, freezeData* data);
+ std::string GSGetBaseSnapshotFilename();
+diff --git a/pcsx2/GS/GSLocalMemory.cpp b/pcsx2/GS/GSLocalMemory.cpp
+index 231f3ad..7c6a706 100644
+--- a/pcsx2/GS/GSLocalMemory.cpp
++++ b/pcsx2/GS/GSLocalMemory.cpp
+@@ -395,7 +395,7 @@ std::vector<GSVector2i>* GSLocalMemory::GetPage2TileMap(const GIFRegTEX0& TEX0)
+ 		{
+ 			u32 page = (bn.value() >> 5) % GS_MAX_PAGES;
+ 
+-			tmp[page].insert((bn.blkY() << 7) + bn.blkX());
++			tmp[page].insert(((bn.blkY() << 7) + bn.blkX()) % GS_MAX_BLOCKS); // ps2x: wie Source::Update umbrechen (TW/TH > 128 Kacheln)
+ 		}
+ 	}
+ 
+diff --git a/pcsx2/GS/GSState.cpp b/pcsx2/GS/GSState.cpp
+index e8b9f37..71fb744 100644
+--- a/pcsx2/GS/GSState.cpp
++++ b/pcsx2/GS/GSState.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-3.0+
+ 
+ #include "GS/GSState.h"
++#include "fmt/format.h"
+ #include "GS/GSDump.h"
+ #include "GS/GSGL.h"
+ #include "GS/GSPerfMon.h"
+@@ -2915,6 +2916,14 @@ void GSState::Write(const u8* mem, int len)
+ 
+ 	if (m_tr.end == 0)
+ 	{
++		{
++			// ps2x: verdaechtige Uebertragungen protokollieren
++			static u32 s_dbg_t = 0;
++			const bool bad = (m_env.TRXPOS.DSAY + m_tr.h) > 2048 || (m_env.TRXPOS.DSAX + m_tr.w) > 2048 || blit.DBW > 32 || blit.DBW == 0;
++			if (bad && s_dbg_t++ < 60)
++				Console.Error(fmt::format("[ps2xlive] TRX verdaechtig: DBP={:X} DBW={} DPSM={:X} DSAX={} DSAY={} w={} h={} len={} BITBLTBUF={:016X} TRXPOS={:016X} TRXREG={:016X}",
++					static_cast<u32>(blit.DBP), static_cast<u32>(blit.DBW), static_cast<u32>(blit.DPSM), static_cast<u32>(m_env.TRXPOS.DSAX), static_cast<u32>(m_env.TRXPOS.DSAY), static_cast<int>(m_tr.w), static_cast<int>(m_tr.h), len, static_cast<u64>(m_env.BITBLTBUF.U64), static_cast<u64>(m_env.TRXPOS.U64), static_cast<u64>(m_env.TRXREG.U64)));
++		}
+ 		GSVector4i r;
+ 
+ 		r = m_tr.rect;
+@@ -3390,6 +3399,10 @@ void GSState::Transfer(const u8* mem, u32 size)
+ 							mem += sizeof(GIFPackedReg);
+ 							size--;
+ 						} while (path.StepReg() && size > 0 && path.reg != 0);
++
++						// ps2x: Paket endete mitten in der Registerschleife -> kein size/total-Unterlauf
++						if (size == 0 || path.nloop == 0)
++							break;
+ 					}
+ 
+ 					// all data available? usually is
+diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
+index 41c98ca..eae3919 100644
+--- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
++++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp
+@@ -1,6 +1,10 @@
+ // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
+ // SPDX-License-Identifier: GPL-3.0+
+ 
++#include <cstdlib>
++#include <chrono>
++#include <thread>
++#include <cstdio>
+ #include "common/AlignedMalloc.h"
+ #include "common/Console.h"
+ #include "common/HashCombine.h"
+@@ -642,7 +646,32 @@ std::optional<GSTextureReplacements::ReplacementTexture> GSTextureReplacements::
+ 		return std::nullopt;
+ 	}
+ 
+-	SetReplacementTextureAlphaMinMax(rtex);
++	// ps2x: Alpha-Bereich komprimierter Texturen aus einer vorab berechneten Zusatzdatei <echte Datei>.alpha (2 Bytes
++	// min/max, erzeugt von tools/dds_mipmaps.py). Sonst entpackt PCSX2 hier jede 4K-Textur komplett auf der CPU -
++	// bei grossen Paketen Ruckeln im Grafik-Thread (Titelbild) und minutenlanges Vorladen.
++	bool fromSidecar = false;
++	if (rtex.format != GSTexture::Format::Color)
++	{
++		char real[4096];
++#ifdef _WIN32
++		const char* rp = _fullpath(real, filename.c_str(), sizeof(real));
++#else
++		const char* rp = realpath(filename.c_str(), real);
++#endif
++		const std::string side = std::string(rp ? rp : filename.c_str()) + ".alpha";
++		if (std::FILE* f = std::fopen(side.c_str(), "rb"))
++		{
++			u8 v[2];
++			if (std::fread(v, 1, 2, f) == 2)
++			{
++				rtex.alpha_minmax = std::make_pair(v[0], v[1]);
++				fromSidecar = true;
++			}
++			std::fclose(f);
++		}
++	}
++	if (!fromSidecar)
++		SetReplacementTextureAlphaMinMax(rtex);
+ 
+ 	return rtex;
+ }
+@@ -969,6 +998,28 @@ void GSTextureReplacements::SyncWorkerThread()
+ 	}
+ }
+ 
++bool GSTextureReplacements::WaitForWorkerIdle(unsigned timeout_ms)
++{
++	const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
++	for (;;)
++	{
++		{
++			std::unique_lock<std::mutex> lock(s_worker_thread_mutex);
++			if (!s_worker_thread.joinable() || s_worker_thread_queue.empty())
++				return true;
++		}
++		if (std::chrono::steady_clock::now() >= end)
++			return false;
++		std::this_thread::sleep_for(std::chrono::milliseconds(5));
++	}
++}
++
++unsigned GSTextureReplacements::PendingWorkerItems()
++{
++	std::unique_lock<std::mutex> lock(s_worker_thread_mutex);
++	return static_cast<unsigned>(s_worker_thread_queue.size());
++}
++
+ void GSTextureReplacements::CancelPendingLoadsAndDumps()
+ {
+ 	std::unique_lock<std::mutex> lock(s_worker_thread_mutex);
+diff --git a/pcsx2/GS/Renderers/HW/GSTextureReplacements.h b/pcsx2/GS/Renderers/HW/GSTextureReplacements.h
+index ef176ed..a493d32 100644
+--- a/pcsx2/GS/Renderers/HW/GSTextureReplacements.h
++++ b/pcsx2/GS/Renderers/HW/GSTextureReplacements.h
+@@ -42,6 +42,9 @@ namespace GSTextureReplacements
+ 	GSTexture* LookupReplacementTexture(const GSTextureCache::HashCacheKey& hash, bool mipmap, bool* pending, std::pair<u8, u8>* alpha_minmax);
+ 	GSTexture* CreateReplacementTexture(const ReplacementTexture& rtex, bool mipmap);
+ 	void ProcessAsyncLoadedTextures();
++	// ps2x: wartet, bis der Lade-Thread alle vorgemerkten Ersatztexturen geladen hat (Vorladen beim Start), hoechstens timeout_ms
++	bool WaitForWorkerIdle(unsigned timeout_ms);
++	unsigned PendingWorkerItems();
+ 
+ 	void DumpTexture(const GSTextureCache::HashCacheKey& hash, const GIFRegTEX0& TEX0, const GIFRegTEXA& TEXA,
+ 		GSTextureCache::SourceRegion region, GSLocalMemory& mem, u32 level);
+diff --git a/pcsx2/GSDumpReplayer.cpp b/pcsx2/GSDumpReplayer.cpp
+index 9c31bb8..74bafe5 100644
+--- a/pcsx2/GSDumpReplayer.cpp
++++ b/pcsx2/GSDumpReplayer.cpp
+@@ -1,7 +1,9 @@
++#include <cstdlib>
+ // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
+ // SPDX-License-Identifier: GPL-3.0+
+ 
+ #include "GS.h"
++#include "GS/GSState.h"
+ #include "GS/GSLzma.h"
+ #include "GSDumpReplayer.h"
+ #include "GameList.h"
+@@ -27,7 +29,10 @@
+ #include "common/Timer.h"
+ 
+ #include <atomic>
++#include <cstring>
++#include <utility>
+ 
++void (*g_ps2xCpuHook)() = nullptr;
+ static void GSDumpReplayerCpuReserve();
+ static void GSDumpReplayerCpuShutdown();
+ static void GSDumpReplayerCpuReset();
+@@ -41,12 +46,133 @@ static std::unique_ptr<GSDumpFile> s_dump_file;
+ static u32 s_current_packet = 0;
+ static u32 s_dump_frame_number = 0;
+ static s32 s_dump_loop_count = 0;
++static bool s_live_regs_written = false; // ps2x: Anzeige-Register seit dem letzten VSync geaendert
+ static bool s_dump_running = false;
+ static bool s_needs_state_loaded = false;
+ static u64 s_frame_ticks = 0;
+ static u64 s_next_frame_time = 0;
+ static bool s_is_dump_runner = false;
+ 
++// ps2x (SotC Recomp): Live-Modus. Statt aus einer .gs-Datei kommen die Pakete aus einem nativen Port
++// (Transfer/VSync/Register im selben Format wie ein GS-Dump), siehe ps2x-gsbridge.
++#include <condition_variable>
++#include <deque>
++#include <mutex>
++namespace
++{
++	struct LivePacket
++	{
++		u8 type; // 0 Transfer, 1 VSync, 3 Register
++		u8 path; // Transfer: GIF_PATH (0..2), VSync: Halbbild
++		std::vector<u8> data;
++	};
++	std::mutex s_live_mutex;
++	std::condition_variable s_live_cv;
++	std::deque<LivePacket> s_live_queue;
++	bool s_live = false;
++	std::vector<std::vector<u8>> s_live_free; // wiederverwendete Paketpuffer (keine malloc pro Paket)
++	bool s_live_waiting = false; // Verbraucher schlaeft -> nur dann wecken (spart futex pro Paket)
++	constexpr const char* LIVE_SUFFIX = "ps2x_live.gs";
++} // namespace
++
++// Erzeuger (Port): Grafikpakete je Thread gesammelt und gebuendelt uebergeben (eine Sperre je 64 Pakete statt je
++// Paket - die Sperre war im Profil der groesste Bremsklotz im VU1-Thread). VSync/Register leeren vorher den Puffer.
++namespace
++{
++	struct LiveBatch
++	{
++		std::vector<LivePacket> pkts;
++		std::vector<std::vector<u8>> free; // eigene wiederverwendbare Puffer dieses Threads
++	};
++	thread_local LiveBatch t_batch;
++
++	void LiveFlushLocked(LiveBatch& b)
++	{
++		for (auto& p : b.pkts)
++			s_live_queue.push_back(std::move(p));
++		b.pkts.clear();
++		// wiederverwendbare Puffer aus dem gemeinsamen Pool holen
++		while (b.free.size() < 64 && !s_live_free.empty())
++		{
++			b.free.push_back(std::move(s_live_free.back()));
++			s_live_free.pop_back();
++		}
++	}
++}
++
++void GSDumpReplayer::LiveFlush()
++{
++	LiveBatch& b = t_batch;
++	if (b.pkts.empty())
++		return;
++	bool wake;
++	{
++		std::lock_guard<std::mutex> lk(s_live_mutex);
++		LiveFlushLocked(b);
++		wake = s_live_waiting;
++	}
++	if (wake)
++		s_live_cv.notify_one();
++}
++
++void GSDumpReplayer::LivePush(u8 type, u8 path, const u8* data, u32 size)
++{
++	LiveBatch& b = t_batch;
++	LivePacket p{type, path, {}};
++	if (!b.free.empty())
++	{
++		p.data = std::move(b.free.back());
++		b.free.pop_back();
++	}
++	if (data && size)
++		p.data.assign(data, data + size);
++	else
++		p.data.clear();
++	b.pkts.push_back(std::move(p));
++	if (type != 0 || b.pkts.size() >= 64u)
++		LiveFlush();
++}
++
++void GSDumpReplayer::LiveReadFifo(u8* mem, u32 qwc)
++{
++	LiveReadFifoReq req{mem, qwc};
++	LiveReadFifoReq* rp = &req;
++	LivePush(4, 0, reinterpret_cast<const u8*>(&rp), sizeof(rp));
++	LiveFlush();
++	while (req.done.load(std::memory_order_acquire) == 0)
++		req.done.wait(0, std::memory_order_acquire);
++}
++
++GSDumpReplayer::LiveReadFifoReq* GSDumpReplayer::LiveReadFifoAsync(u8* mem, u32 qwc)
++{
++	LiveReadFifoReq* rp = new LiveReadFifoReq{mem, qwc};
++	rp->refs.store(2, std::memory_order_relaxed);
++	LivePush(4, 0, reinterpret_cast<const u8*>(&rp), sizeof(rp));
++	LiveFlush();
++	return rp;
++}
++
++void GSDumpReplayer::LiveReadFifoWait(LiveReadFifoReq* req)
++{
++	if (!req)
++		return;
++	while (req->done.load(std::memory_order_acquire) == 0)
++		req->done.wait(0, std::memory_order_acquire);
++	if (req->refs.fetch_sub(1, std::memory_order_acq_rel) == 1)
++		delete req;
++}
++
++bool GSDumpReplayer::IsLiveMode()
++{
++	return s_live;
++}
++
++size_t GSDumpReplayer::LiveQueueSize()
++{
++	std::lock_guard<std::mutex> lk(s_live_mutex);
++	return s_live_queue.size();
++}
++
+ R5900cpu GSDumpReplayerCpu = {
+ 	GSDumpReplayerCpuReserve,
+ 	GSDumpReplayerCpuShutdown,
+@@ -62,7 +188,7 @@ static InterpVU1 gsDumpVU1;
+ 
+ bool GSDumpReplayer::IsReplayingDump()
+ {
+-	return static_cast<bool>(s_dump_file);
++	return s_live || static_cast<bool>(s_dump_file);
+ }
+ 
+ bool GSDumpReplayer::IsRunner()
+@@ -88,6 +214,17 @@ int GSDumpReplayer::GetLoopCount()
+ bool GSDumpReplayer::Initialize(const char* filename, Error* error)
+ {
+ 	Common::Timer timer;
++	if (std::string_view(filename).ends_with(LIVE_SUFFIX))
++	{
++		Console.WriteLn("(GSDumpReplayer) ps2x live mode");
++		s_live = true;
++		Cpu = &GSDumpReplayerCpu;
++		psxCpu = &psxInt;
++		CpuVU0 = &gsDumpVU0;
++		CpuVU1 = &gsDumpVU1;
++		s_dump_loop_count = -1;
++		return true;
++	}
+ 	Console.WriteLn("(GSDumpReplayer) Reading file '%s'...", filename);
+ 
+ 	Error dump_error;
+@@ -143,6 +280,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
+ 
+ void GSDumpReplayer::Shutdown()
+ {
++	s_live = false;
+ 	Console.WriteLn("(GSDumpReplayer) Shutting down.");
+ 
+ 	Cpu = nullptr;
+@@ -154,6 +292,12 @@ void GSDumpReplayer::Shutdown()
+ 
+ std::string GSDumpReplayer::GetDumpSerial()
+ {
++	if (s_live)
++	{
++		// ps2x: Spiel per Umgebung (PS2XGS_SERIAL, z. B. SLUS-20314 fuer TimeSplitters 2); ohne Angabe wie bisher SotC
++		const char* serial = std::getenv("PS2XGS_SERIAL");
++		return (serial && *serial) ? std::string(serial) : std::string("SCES-53326");
++	}
+ 	std::string ret;
+ 
+ 	if (!s_dump_file->GetSerial().empty())
+@@ -175,6 +319,11 @@ std::string GSDumpReplayer::GetDumpSerial()
+ 
+ u32 GSDumpReplayer::GetDumpCRC()
+ {
++	if (s_live)
++	{
++		const char* crc = std::getenv("PS2XGS_CRC");
++		return (crc && *crc) ? static_cast<u32>(std::strtoul(crc, nullptr, 16)) : 0x0F0C4A9Cu;
++	}
+ 	return s_dump_file->GetCRC();
+ }
+ 
+@@ -200,6 +349,12 @@ void GSDumpReplayerCpuReset()
+ 
+ static void GSDumpReplayerLoadInitialState()
+ {
++	if (s_live)
++	{
++		std::memset(PS2MEM_GS, 0, Ps2MemSize::GSregs);
++		MTGS::ResetGS(true);
++		return;
++	}
+ 	// reset GS registers to initial dump values
+ 	std::memcpy(PS2MEM_GS, s_dump_file->GetRegsData().data(),
+ 		std::min(Ps2MemSize::GSregs, static_cast<u32>(s_dump_file->GetRegsData().size())));
+@@ -218,6 +373,20 @@ static void GSDumpReplayerSendPacketToMTGS(GIF_PATH path, const u8* data, size_t
+ 	pxAssert((length % 16) == 0 && length < UINT32_MAX);
+ 
+ 	const u32 truncated_length = static_cast<u32>(length);
++	{
++		static u32 s_dbg_n = 0;
++		Gif_Path& gp = gifUnit.gifPath[static_cast<int>(path) < 3 ? path : GIF_PATH_3];
++		if (s_dbg_n < 4 || static_cast<int>(path) >= 3 || length > gp.buffSize / 2)
++		{
++			s_dbg_n++;
++			const u64* q = reinterpret_cast<const u64*>(data);
++			Console.WriteLn(fmt::format("[ps2xlive] pkt path={} len={} buf={} size={} off={} cur={} tag={:016X}",
++				static_cast<int>(path), length, static_cast<const void*>(gp.buffer), gp.buffSize, gp.curOffset, gp.curSize,
++				length >= 8 ? q[0] : 0));
++		}
++		if (static_cast<int>(path) >= 3 || length == 0 || length > gp.buffSize / 2)
++			return;
++	}
+ 
+ 	Gif_Path& gifPath = gifUnit.gifPath[path];
+ 	gifPath.CopyGSPacketData(const_cast<u8*>(data), truncated_length);
+@@ -264,6 +433,99 @@ void GSDumpReplayerCpuStep()
+ 		s_needs_state_loaded = false;
+ 	}
+ 
++	if (s_live)
++	{
++		{
++			extern void (*g_ps2xCpuHook)();
++			if (g_ps2xCpuHook)
++				g_ps2xCpuHook(); // ps2x: Einstellungen aus dem Spielmenue anwenden, Menue bei Pause neu zeichnen
++		}
++		static LivePacket lp; // Puffer des letzten Pakets wird beim naechsten Mal in den Pool zurueckgegeben
++		static std::deque<LivePacket> s_local;
++		static std::vector<std::vector<u8>> s_done;
++		if (!s_local.empty())
++		{
++			if (lp.data.capacity() && s_done.size() < 256)
++				s_done.push_back(std::move(lp.data));
++			lp = std::move(s_local.front());
++			s_local.pop_front();
++		}
++		else
++		{
++			std::unique_lock<std::mutex> lk(s_live_mutex);
++			s_live_waiting = true;
++			const bool got = s_live_cv.wait_for(lk, std::chrono::milliseconds(5), [] { return !s_live_queue.empty(); });
++			s_live_waiting = false;
++			if (!got)
++			{
++				lk.unlock();
++				VMManager::Internal::VSyncOnCPUThread(); // Ereignisse/Einstellungen weiter bearbeiten
++				if (VMManager::Internal::IsExecutionInterrupted())
++					GSDumpReplayerExitExecution();
++				Host::PumpMessagesOnCPUThread();
++				return;
++			}
++			if (lp.data.capacity() && s_live_free.size() < 256)
++				s_live_free.push_back(std::move(lp.data));
++			for (auto& d : s_done)
++				if (s_live_free.size() < 256)
++					s_live_free.push_back(std::move(d));
++			s_done.clear();
++			// Verbraucher: alles auf einmal uebernehmen, dann ohne Sperre abarbeiten
++			s_local.swap(s_live_queue);
++			lp = std::move(s_local.front());
++			s_local.pop_front();
++		}
++		switch (lp.type)
++		{
++			case 0:
++				if (!lp.data.empty())
++					GSDumpReplayerSendPacketToMTGS(static_cast<GIF_PATH>(lp.path), lp.data.data(), lp.data.size());
++				break;
++			case 1:
++				s_dump_frame_number++;
++				if ((s_dump_frame_number % 50) == 0)
++				{
++					const u64* g = reinterpret_cast<const u64*>(PS2MEM_GS);
++					Console.WriteLn(fmt::format("[ps2xlive] VS {} draws={} trx={} PMODE={:X} SMODE2={:X} DISPFB1={:X} DISPLAY1={:X} DISPFB2={:X} DISPLAY2={:X} queue={}",
++						s_dump_frame_number, GSState::s_n, GSState::s_transfer_n, g[0], g[4], g[14], g[16], g[18], g[20], GSDumpReplayer::LiveQueueSize()));
++				}
++				MTGS::PostVsyncStart(std::exchange(s_live_regs_written, false));
++				VMManager::Internal::VSyncOnCPUThread();
++				if (VMManager::Internal::IsExecutionInterrupted())
++					GSDumpReplayerExitExecution();
++				Host::PumpMessagesOnCPUThread();
++				break;
++			case 3:
++			{
++				// ps2x: neues Bild erkannt, wenn sich ein Anzeige-Register (PMODE, DISPFB1/2, DISPLAY1/2) aendert.
++				// PCSX2 zaehlt sonst die Schreibzugriffe der EE; ohne dieses Signal hielt es jedes zweite Bild
++				// fuer ein Duplikat (SkipDuplicateFrames) und die Anzeige zeigte 29.97 statt 59.94 FPS.
++				static const size_t offs[] = {0x00, 0x70, 0x80, 0x90, 0xA0};
++				for (size_t o : offs)
++					if (lp.data.size() >= o + 8 && std::memcmp(PS2MEM_GS + o, lp.data.data() + o, 8) != 0)
++						s_live_regs_written = true;
++				std::memcpy(PS2MEM_GS, lp.data.data(), std::min<size_t>(lp.data.size(), Ps2MemSize::GSregs));
++				break;
++			}
++			case 4: // ps2x: GS-Download, wie PCSX2 auf dem CPU-Thread (MTGS-Erzeuger)
++			{
++				GSDumpReplayer::LiveReadFifoReq* rp = nullptr;
++				std::memcpy(&rp, lp.data.data(), sizeof(rp));
++				MTGS::InitAndReadFIFO(rp->mem, rp->qwc);
++				const bool heap = rp->refs.load(std::memory_order_relaxed) != 0;
++				rp->done.store(1, std::memory_order_release);
++				rp->done.notify_all();
++				if (heap && rp->refs.fetch_sub(1, std::memory_order_acq_rel) == 1)
++					delete rp;
++				break;
++			}
++			default:
++				break;
++		}
++		return;
++	}
++
+ 	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
+ 	s_current_packet = (s_current_packet + 1) % static_cast<u32>(s_dump_file->GetPackets().size());
+ 	if (s_current_packet == 0)
+@@ -371,6 +633,8 @@ void GSDumpReplayerCpuClear(u32 addr, u32 size)
+ 
+ void GSDumpReplayer::RenderUI()
+ {
++	if (s_live || !s_dump_file)
++		return; // ps2x live: kein Dump-Overlay
+ 	const float scale = ImGuiManager::GetGlobalScale();
+ 	const float shadow_offset = std::ceil(1.0f * scale);
+ 	const float margin = std::ceil(GSConfig.OsdMargin * scale);
+diff --git a/pcsx2/GSDumpReplayer.h b/pcsx2/GSDumpReplayer.h
+index a60e431..3b7efb4 100644
+--- a/pcsx2/GSDumpReplayer.h
++++ b/pcsx2/GSDumpReplayer.h
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-3.0+
+ 
+ #pragma once
++#include <atomic>
+ 
+ #include "common/Error.h"
+ 
+@@ -12,6 +13,24 @@ namespace GSDumpReplayer
+ {
+ 	bool IsReplayingDump();
+ 
++	// ps2x live mode (nativer Port speist Pakete ein)
++	void LivePush(u8 type, u8 path, const u8* data, u32 size);
++	void LiveFlush(); // ps2x: gesammelte Pakete dieses Threads uebergeben
++	// ps2x: GS-Download (VIF1-FIFO) in Paketreihenfolge auf dem CPU-Thread ausfuehren (einziger MTGS-Erzeuger)
++	struct LiveReadFifoReq
++	{
++		u8* mem;
++		u32 qwc;
++		std::atomic<int> done{0};
++		std::atomic<int> refs{0}; // ps2x: 0 = Aufrufer-Stapel (synchron), 2 = Heap (asynchron, letzter gibt frei)
++	};
++	void LiveReadFifo(u8* mem, u32 qwc);
++	// ps2x: asynchron - Auftrag in die Live-Warteschlange, sofort zurueck; Wait blockiert bis fertig und gibt frei
++	LiveReadFifoReq* LiveReadFifoAsync(u8* mem, u32 qwc);
++	void LiveReadFifoWait(LiveReadFifoReq* req);
++	size_t LiveQueueSize();
++	bool IsLiveMode();
++
+ 	/// If set, playback will repeat once it reaches the last frame.
+ 	void SetLoopCount(s32 loop_count = 0);
+ 	int GetLoopCount();
+diff --git a/pcsx2/ImGui/ImGuiOverlays.cpp b/pcsx2/ImGui/ImGuiOverlays.cpp
+index cc9558b..fa5f2cc 100644
+--- a/pcsx2/ImGui/ImGuiOverlays.cpp
++++ b/pcsx2/ImGui/ImGuiOverlays.cpp
+@@ -1807,8 +1807,13 @@ void SaveStateSelectorUI::ShowSlotOSDMessage()
+ 		Host::OSD_QUICK_DURATION);
+ }
+ 
++// ps2x (SotC Recomp): Spielmenue der Bruecke, wird auf dem GS-Thread mit aktivem ImGui-Kontext gezeichnet
++void (*g_ps2xMenuDraw)() = nullptr;
++
+ void ImGuiManager::RenderOverlays()
+ {
++	if (g_ps2xMenuDraw)
++		g_ps2xMenuDraw();
+ 	const float scale = ImGuiManager::GetGlobalScale();
+ 	const float margin = std::ceil(GSConfig.OsdMargin * scale);
+ 	const float spacing = std::ceil(5.0f * scale);
+diff --git a/pcsx2/IopDma.cpp b/pcsx2/IopDma.cpp
+index 3b3abb7..9823bab 100644
+--- a/pcsx2/IopDma.cpp
++++ b/pcsx2/IopDma.cpp
+@@ -72,6 +72,15 @@ int psxDma4Interrupt()
+ 
+ void spu2DMA4Irq()
+ {
++	{
++		extern void (*g_ps2xSpuIrqHook)(int);
++		if (g_ps2xSpuIrqHook)
++		{
++			SPU2interruptDMA4();
++			g_ps2xSpuIrqHook(1);
++			return;
++		}
++	}
+ #ifdef SPU2IRQTEST
+ 	Console.Warning("spu2DMA4Irq()");
+ #endif
+@@ -100,6 +109,15 @@ int psxDma7Interrupt()
+ 
+ void spu2DMA7Irq()
+ {
++	{
++		extern void (*g_ps2xSpuIrqHook)(int);
++		if (g_ps2xSpuIrqHook)
++		{
++			SPU2interruptDMA7();
++			g_ps2xSpuIrqHook(2);
++			return;
++		}
++	}
+ #ifdef SPU2IRQTEST
+ 	Console.Warning("spu2DMA7Irq()");
+ #endif
+diff --git a/pcsx2/IopIrq.cpp b/pcsx2/IopIrq.cpp
+index 4a10365..a3bd4c5 100644
+--- a/pcsx2/IopIrq.cpp
++++ b/pcsx2/IopIrq.cpp
+@@ -37,8 +37,15 @@ void fwIrq()
+ 	iopIntcIrq(24);
+ }
+ 
++void (*g_ps2xSpuIrqHook)(int) = nullptr; // ps2x: SPU2-Interrupts an den IOP des Ports (0 = SPU, 1 = DMA4, 2 = DMA7)
++
+ void spu2Irq()
+ {
++	if (g_ps2xSpuIrqHook)
++	{
++		g_ps2xSpuIrqHook(0);
++		return;
++	}
+ 	#ifdef SPU2IRQTEST
+ 		Console.Warning("spu2Irq");
+ 	#endif
+diff --git a/pcsx2/MTGS.cpp b/pcsx2/MTGS.cpp
+index 98b453c..227c4ef 100644
+--- a/pcsx2/MTGS.cpp
++++ b/pcsx2/MTGS.cpp
+@@ -4,6 +4,7 @@
+ #include "GS.h"
+ #include "Gif_Unit.h"
+ #include "MTGS.h"
++#include "GSDumpReplayer.h"
+ #include "MTVU.h"
+ #include "Host.h"
+ #include "IconsFontAwesome.h"
+@@ -12,6 +13,7 @@
+ #include "common/FPControl.h"
+ #include "common/ScopedGuard.h"
+ #include "common/StringUtil.h"
++#include "fmt/format.h"
+ #include "common/WrappedMemCopy.h"
+ 
+ #include <list>
+@@ -451,8 +453,15 @@ void MTGS::MainLoop()
+ 					Gif_Path& path = gifUnit.gifPath[tag.data[2]];
+ 					u32 offset = tag.data[0];
+ 					u32 size = tag.data[1];
+-					if (offset != ~0u)
+-						GSgifTransfer((u8*)&path.buffer[offset], size / 16);
++					if (offset != ~0u && (u64)offset + size > path.buffSize)
++						Console.Error(fmt::format("[ps2xlive] MTGS GSPacket ausserhalb: path={} off={} size={}", tag.data[2], offset, size));
++					else if (offset != ~0u)
++					{
++						if (GSDumpReplayer::IsLiveMode())
++							GSgifTransferLive(tag.data[2], (u8*)&path.buffer[offset], size / 16);
++						else
++							GSgifTransfer((u8*)&path.buffer[offset], size / 16);
++					}
+ 					path.readAmount.fetch_sub(size, std::memory_order_acq_rel);
+ 					break;
+ 				}
+diff --git a/pcsx2/SPU2/spu2.cpp b/pcsx2/SPU2/spu2.cpp
+index 2c7a5f8..40075c3 100644
+--- a/pcsx2/SPU2/spu2.cpp
++++ b/pcsx2/SPU2/spu2.cpp
+@@ -1,6 +1,9 @@
+ // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
+ // SPDX-License-Identifier: GPL-3.0+
+ 
++#include <algorithm>
++#include <cstdlib>
++#include <cstdio>
+ #include "SPU2/spu2.h"
+ #include "SPU2/defs.h"
+ #include "SPU2/Debug.h"
+@@ -512,6 +515,8 @@ static void DCFilter(float *input)
+ 	input[1] = output[1];
+ }
+ 
++std::FILE* g_ps2xWavFile = nullptr;
++
+ __forceinline void spu2Output(StereoOut32 out)
+ {
+ 	float conv[2];
+@@ -523,6 +528,31 @@ __forceinline void spu2Output(StereoOut32 out)
+      * significant DC offset, so we filter it out (e.x. SSX 3)*/
+ 	DCFilter(conv);
+ 
++	// ps2x: PS2X_WAVREC=<datei.wav> nimmt den fertigen SPU2-Ausgang auf (48 kHz, 16 Bit, Stereo) - Tonvergleich mit PCSX2
++	{
++		static std::FILE* wav = [] () -> std::FILE* {
++			const char* p = std::getenv("PS2X_WAVREC");
++			if (!p || !*p) return nullptr;
++			std::FILE* f = std::fopen(p, "wb");
++			if (!f) return nullptr;
++			const uint8_t hdr[44] = {'R','I','F','F',0,0,0,0,'W','A','V','E','f','m','t',' ',16,0,0,0,1,0,2,0,
++				0x80,0xBB,0,0, 0x00,0xEE,0x02,0, 4,0,16,0,'d','a','t','a',0,0,0,0};
++			std::fwrite(hdr, 1, 44, f);
++			std::atexit([] {
++				extern std::FILE* g_ps2xWavFile; if (!g_ps2xWavFile) return;
++				const long n = std::ftell(g_ps2xWavFile) - 44; const uint32_t d = static_cast<uint32_t>(n), r = d + 36;
++				std::fseek(g_ps2xWavFile, 4, SEEK_SET); std::fwrite(&r, 4, 1, g_ps2xWavFile);
++				std::fseek(g_ps2xWavFile, 40, SEEK_SET); std::fwrite(&d, 4, 1, g_ps2xWavFile); std::fclose(g_ps2xWavFile); g_ps2xWavFile = nullptr; });
++			extern std::FILE* g_ps2xWavFile; g_ps2xWavFile = f;
++			return f; }();
++		if (wav)
++		{
++			const int16_t smp[2] = {static_cast<int16_t>(std::clamp(conv[0], -1.0f, 1.0f) * 32767.0f), static_cast<int16_t>(std::clamp(conv[1], -1.0f, 1.0f) * 32767.0f)};
++			std::fwrite(smp, sizeof(smp), 1, wav);
++			static uint32_t n = 0; if ((++n & 0xFFFF) == 0) std::fflush(wav);
++		}
++	}
++
+ 	s_current_chunk[s_current_chunk_pos++] = conv[0];
+ 	s_current_chunk[s_current_chunk_pos++] = conv[1];
+ 	if (s_current_chunk_pos == s_current_chunk.size())
