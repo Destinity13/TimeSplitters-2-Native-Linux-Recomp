@@ -21,7 +21,7 @@
 [![AI-assisted](https://img.shields.io/badge/AI--assisted-Claude-d97757)](#ai-disclosure)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
 
-[Play it](#play-it-in-3-minutes) · [Online](#online-multiplayer) · [What makes it different](#what-makes-it-different) · [Gallery](#gallery) · [Before / after](#before--after) · [FAQ](#faq) · [Status](#status) · [How it works](#how-it-works) · [Docs](#documentation)
+[News](news/README.md) · [Play it](#play-it-in-3-minutes) · [Online](#online-multiplayer) · [What makes it different](#what-makes-it-different) · [Gallery](#gallery) · [Before / after](#before--after) · [FAQ](#faq) · [Status](#status) · [How it works](#how-it-works) · [Docs](#documentation)
 
 <img src="docs/screenshots/intros.gif" width="100%" alt="Level intros of Chicago, Aztec and the Siberia opening, rendered by the port at 2x internal resolution in 16:9">
 <sub>Level intros (Chicago, Aztec, the Siberia opening) straight from the port: 16:9, 2× internal resolution, no ghosting. Captured from an automated run, every 4th frame.</sub>

@@ -1,0 +1,16 @@
+[
+  {
+    "date": "2026-11-13T12:00:00Z",
+    "title": "What's new in 1.1, and what's still in testing",
+    "tag": "Dev log",
+    "body": "A new launcher with automatic updates, proper 16:9 menus and HUD, mouse aiming, a clearer sniper scope and online play. Here's what's done and what's still being tested.",
+    "url": "https://github.com/Destinity13/TimeSplitters-2-Native-Recomp-Windows-Linux-SteamDeck/blob/main/news/2026-11-13-whats-new-1-1.md"
+  },
+  {
+    "date": "2026-11-12T12:00:00Z",
+    "title": "Online+ - a first look",
+    "tag": "Coming soon",
+    "body": "Online+ is an optional second edition with its own lobby, server browser, ranks, killfeed and scoreboard. Everything sits in the game's own menus. The classic game and its multiplayer stay untouched.",
+    "url": "https://github.com/Destinity13/TimeSplitters-2-Native-Recomp-Windows-Linux-SteamDeck/blob/main/news/2026-11-12-online-plus-coming.md"
+  }
+]
