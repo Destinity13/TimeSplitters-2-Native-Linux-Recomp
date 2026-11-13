@@ -1755,15 +1755,25 @@ namespace ps2xmenu
 	// texturpakete/*.zip|7z|rar importiert). Ziel: <Textures>/SCES-53326/replacements als Verweise (Symlinks); spaetere
 	// source overrides earlier ones, HD text last. PS2XGS_TEXDIR (test runs) turns the management off.
 	// PS2XGS_TEXQUELLEN: directory with the texture sources (start script: <project>/build/texturquellen), otherwise ~/.config/...
+	// Folder inside the settings directory. With English settings (PS2XGS_CFG_EN=1) the folder has an English name;
+	// a folder left by an older version under the old name is renamed once.
+	std::string cfgOrdner(const char* alt, const char* neu)
+	{
+		if (!cfgEnglish()) return dir() + "/" + alt;
+		const std::string n = dir() + "/" + neu, a = dir() + "/" + alt;
+		std::error_code ec;
+		if (!std::filesystem::exists(n, ec) && std::filesystem::exists(a, ec)) { std::filesystem::rename(a, n, ec); if (ec) return a; }
+		return n;
+	}
 	std::string quellenDir()
 	{
 		if (const char* q = std::getenv("PS2XGS_TEXQUELLEN"); q && *q) return q;
-		return dir() + "/texturquellen";
+		return cfgOrdner("texturquellen", "texture_sources");
 	}
 	std::string texRoot()
 	{
 		if (const char* t = std::getenv("PS2XGS_TEXDIR"); t && *t) return t;
-		return dir() + "/texturen";
+		return cfgOrdner("texturen", "textures");
 	}
 	bool texManaged() { const char* t = std::getenv("PS2XGS_TEXDIR"); return !(t && *t); }
 	std::vector<std::string> listSources()
@@ -4394,7 +4404,7 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		// HD-Texturen (Schrift, Logos, Menues): eigener Ordner, PCSX2-Austauschmechanismus
 		std::string tex;
 		if (const char* t = std::getenv("PS2XGS_TEXDIR"); t && *t) tex = t;
-		else tex = ps2xmenu::dir() + "/texturen";
+		else tex = ps2xmenu::texRoot();
 		s_settings_interface.SetStringValue("Folders", "Textures", tex.c_str());
 		EmuFolders::Textures = tex; // already set at start from the PCSX2 configuration
 		{ const unsigned n = ps2xmenu::assembleTextures(); if (n) Console.WriteLn("[ps2x] textures: %u replacement files active (HD text/packs)", n); }
