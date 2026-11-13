@@ -28,6 +28,19 @@
 
 </div>
 
+<!-- news:start -->
+## 📣 News
+
+<table>
+<tr>
+<td width="50%" valign="top"><a href="news/2026-11-13-whats-new-1-1.md"><img src="news/img/story-siberia.jpg" width="100%" alt=""></a><br><sub>2026-11-13 · Dev log</sub><br><b><a href="news/2026-11-13-whats-new-1-1.md">What's new in 1.1, and what's still in testing</a></b><br><sub>A new launcher with automatic updates, proper 16:9 menus and HUD, mouse aiming, a clearer sniper scope and online play. Here's what's done and what's still being tested.</sub></td>
+<td width="50%" valign="top"><a href="news/2026-11-12-online-plus-coming.md"><img src="news/img/op-scoreboard.jpg" width="100%" alt=""></a><br><sub>2026-11-12 · Coming soon</sub><br><b><a href="news/2026-11-12-online-plus-coming.md">Online+ - a first look</a></b><br><sub>Online+ is an optional second edition with its own lobby, server browser, ranks, killfeed and scoreboard. Everything sits in the game's own menus. The classic game and its multiplayer stay untouched.</sub></td>
+</tr>
+</table>
+
+<sub>All posts, patch notes and what's coming next: <a href="news/README.md">news</a></sub>
+<!-- news:end -->
+
 > [!TIP]
 > **🪟 1.0.1: TimeSplitters 2 now runs natively on Windows 10 / 11.** Same idea as on Linux: download, extract,
 > pick your disc image – nothing to install. Direct3D 11, 60 FPS, the first story level played through on a real PC

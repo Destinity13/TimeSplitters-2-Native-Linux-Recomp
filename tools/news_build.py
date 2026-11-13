@@ -8,7 +8,8 @@ Each news/YYYY-MM-DD-name.md starts with a header block:
     tag: Coming soon | Patch | Release | Dev log
     summary: one or two sentences
     ---
-Writes launcher/news.json (read by the launcher's News tab) and refreshes the post table in news/README.md.
+Each post may also set `image: img/<file>.jpg` (shown in the main README). Writes launcher/news.json (read by the
+launcher's News tab), refreshes the post table in news/README.md and the "Latest news" block in the main README.
 """
 import json
 import pathlib
@@ -49,6 +50,20 @@ def main():
     text = readme.read_text(encoding="utf-8")
     text = re.sub(r"\| Date \| Post \| Type \|\n\|---\|---\|---\|\n(?:\|.*\|\n)*", lambda _: table, text, count=1)
     readme.write_text(text, encoding="utf-8")
+    # "Latest news" in the main README: the two newest posts with a picture, between the news markers
+    cells = []
+    for p in posts[:2]:
+        img = p.get('image', '')
+        pic = f'<a href="news/{p["file"]}"><img src="news/{img}" width="100%" alt=""></a><br>' if img else ''
+        cells.append(f'<td width="50%" valign="top">{pic}<sub>{p["date"]} · {p["tag"]}</sub><br>'
+                     f'<b><a href="news/{p["file"]}">{p["title"]}</a></b><br><sub>{p["summary"]}</sub></td>')
+    block = ('<!-- news:start -->\n## 📣 News\n\n<table>\n<tr>\n' + '\n'.join(cells) + '\n</tr>\n</table>\n\n'
+             '<sub>All posts, patch notes and what\'s coming next: <a href="news/README.md">news</a></sub>\n<!-- news:end -->')
+    main = ROOT / 'README.md'
+    if main.exists():
+        t = main.read_text(encoding='utf-8')
+        t2 = re.sub(r'<!-- news:start -->.*?<!-- news:end -->', lambda _: block, t, count=1, flags=re.S)
+        if t2 != t: main.write_text(t2, encoding='utf-8')
     print(f"{len(posts)} post(s) -> {out.relative_to(ROOT)}")
 
 

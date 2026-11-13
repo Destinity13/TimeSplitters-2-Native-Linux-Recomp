@@ -2,6 +2,7 @@
 title: Online+ - a first look
 date: 2026-11-12
 tag: Coming soon
+image: img/op-scoreboard.jpg
 summary: Online+ is an optional second edition with its own lobby, server browser, ranks, killfeed and scoreboard. Everything sits in the game's own menus. The classic game and its multiplayer stay untouched.
 ---
 
