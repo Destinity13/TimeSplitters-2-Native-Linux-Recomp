@@ -1220,6 +1220,36 @@ namespace ps2xfeed
 	bool imMatch() { return ps2xosd::jetztMs() - tafelMs.load() < 2000; }
 }
 // Hotkeys: F9 FPS-Anzeige, F10 Turbo (ohne Bildratenbegrenzung), F12 Screenshot; kurze Einblendung (Toast)
+// ps2x: MTGS::RunOnGSThread writes the MTGS ring, which has exactly one producer: the CPU thread (live playback).
+// Calls from other threads (screenshots from the port, hotkeys, recording start/stop) raced with the GIF packets of
+// the CPU thread and corrupted the ring: garbage transfers (black picture) and jumps to invalid addresses (GS crash).
+// gsCall() hands such work to the CPU thread, which passes it on in its hook (ps2xmenu::cpuHook).
+namespace ps2xgsq
+{
+	std::mutex m;
+	std::vector<std::function<void()>> q;
+	std::atomic<bool> aktiv{false};
+	std::atomic<std::thread::id> cpu{};
+	void drain()
+	{
+		cpu.store(std::this_thread::get_id());
+		aktiv.store(true);
+		std::vector<std::function<void()>> v;
+		{ std::lock_guard<std::mutex> lk(m); v.swap(q); }
+		for (auto& f : v) MTGS::RunOnGSThread(std::move(f));
+	}
+}
+static void gsCall(std::function<void()> f)
+{
+	if (!ps2xgsq::aktiv.load() || std::this_thread::get_id() == ps2xgsq::cpu.load())
+	{
+		MTGS::RunOnGSThread(std::move(f));
+		return;
+	}
+	std::lock_guard<std::mutex> lk(ps2xgsq::m);
+	ps2xgsq::q.push_back(std::move(f));
+}
+
 namespace ps2xhot
 {
 	std::atomic<bool> turbo{false};
@@ -1240,7 +1270,7 @@ namespace ps2xhot
 		aufnahme.store(true);
 		// 59.94 Hz directly: in the bridge's live mode the GS state does not always know the TV mode (SMODE1 still empty),
 		// then GSBeginCapture returns fps = 0 and the encoder refuses ("timebase not set").
-		MTGS::RunOnGSThread([datei]() {
+		gsCall([datei]() {
 			if (!g_gs_renderer) return;
 			// Recording settings directly in GSConfig (the values from toSettings do not arrive here)
 			const auto envOr = [](const char* k, const char* d) { const char* e = std::getenv(k); return (e && *e) ? e : d; };
@@ -1286,14 +1316,15 @@ namespace ps2xhot
 	void aufnahmeBeenden()
 	{
 		if (!aufnahme.exchange(false)) return;
-		std::atomic<bool> fertig{false};
-		MTGS::RunOnGSThread([&fertig]() { GSCapture::EndCapture(); fertig.store(true); });
-		for (int i = 0; i < 600 && !fertig.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		// shared: if the wait times out, the call must not write into this (then gone) stack frame
+		auto fertig = std::make_shared<std::atomic<bool>>(false);
+		gsCall([fertig]() { GSCapture::EndCapture(); fertig->store(true); });
+		for (int i = 0; i < 600 && !fertig->load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 	void aufnahmeStopp()
 	{
 		aufnahme.store(false);
-		MTGS::RunOnGSThread([]() { GSCapture::EndCapture(); });
+		gsCall([]() { GSCapture::EndCapture(); });
 		toast("Recording saved: " + aufnahmeDatei);
 	}
 	std::string shotDir()
@@ -3366,6 +3397,7 @@ namespace ps2xmenu
 	// CPU thread (live playback): apply settings; redraw while the menu is open (game paused)
 	void cpuHook()
 	{
+		ps2xgsq::drain();
 		if (applyPending.exchange(false))
 		{
 			toSettings(s_settings_interface);
@@ -3468,7 +3500,7 @@ static void ps2xKey(KeySym ks, bool down, bool alt)
 			char tb[32]; const std::time_t now = std::time(nullptr);
 			std::strftime(tb, sizeof(tb), "%Y%m%d_%H%M%S", std::localtime(&now));
 			const std::string p = ps2xhot::shotDir() + "/ts2_" + tb + ".png";
-			MTGS::RunOnGSThread([p]() { GSQueueSnapshot(p); });
+			gsCall([p]() { GSQueueSnapshot(p); });
 			ps2xhot::toast("Screenshot: " + p);
 		}
 		else if (ps2xmenu::open.load())
@@ -3602,6 +3634,13 @@ static LRESULT CALLBACK ps2xWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		case WM_SIZE:
 			s_wi.surface_width = LOWORD(lp);
 			s_wi.surface_height = HIWORD(lp);
+			// ps2x: resize the swap chain - D3D11/Vulkan do not follow the window by themselves (fullscreen left it at the
+			// start size, the menu then took the mouse at the wrong place). Only once the CPU thread runs (MTGS open).
+			if (LOWORD(lp) > 0 && HIWORD(lp) > 0 && ps2xgsq::aktiv.load())
+			{
+				const u32 w = LOWORD(lp), h = HIWORD(lp);
+				gsCall([w, h]() { if (g_gs_device) GSResizeDisplayWindow(w, h, 1.0f); });
+			}
 			[[fallthrough]];
 		case WM_MOVE:
 			if (ps2xin::mausGefangen.load()) // Fenster verschoben / Vollbild gewechselt: Zeigerbegrenzung nachziehen
@@ -4428,7 +4467,7 @@ PS2XGS_API void ps2xgs_capture_end() { ps2xhot::aufnahmeBeenden(); }
 PS2XGS_API void ps2xgs_screenshot(const char* path)
 {
 	std::string p(path);
-	MTGS::RunOnGSThread([p]() { GSQueueSnapshot(p); });
+	gsCall([p]() { GSQueueSnapshot(p); });
 }
 
 // Input for the port: pressed PS2 buttons (1 = pressed) and sticks (lx, ly, rx, ry; 0x80 = centre).
