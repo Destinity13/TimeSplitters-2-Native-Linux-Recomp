@@ -7519,6 +7519,21 @@ index f05e04d..05895d5 100644
  #else
  #ifdef __APPLE__
  	// MacOS has a bug where posix_memalign is ridiculously slow on unaligned sizes
+diff --git a/common/CrashHandler.cpp b/common/CrashHandler.cpp
+index a44f07a..c18933d 100644
+--- a/common/CrashHandler.cpp
++++ b/common/CrashHandler.cpp
+@@ -327,7 +327,9 @@ void CrashHandler::CrashSignalHandler(int signal, siginfo_t* siginfo, void* ctx)
+ 
+ bool CrashHandler::Install()
+ {
+-	const std::string progpath = FileSystem::GetProgramPath();
++	// ps2x: libbacktrace keeps the filename pointer and reads it only at the first crash - a local string was long gone
++	// by then (it pointed into reused memory, "…/bin/resources"), and the crash handler crashed itself without a stack.
++	static const std::string progpath = FileSystem::GetProgramPath();
+ 	s_backtrace_state = backtrace_create_state(progpath.empty() ? nullptr : progpath.c_str(), 0, nullptr, nullptr);
+ 	if (!s_backtrace_state)
+ 		return false;
 diff --git a/pcsx2/GS/GS.cpp b/pcsx2/GS/GS.cpp
 index 8291c3b..4095d48 100644
 --- a/pcsx2/GS/GS.cpp

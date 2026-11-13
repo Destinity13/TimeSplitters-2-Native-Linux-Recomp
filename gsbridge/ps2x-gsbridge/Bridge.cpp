@@ -1422,7 +1422,7 @@ namespace ps2xmenu
 	{
 		if (sprache.load() != 1) return en;
 		static const std::unordered_map<std::string_view, const char*> de = {
-			{"Settings", "Einstellungen"}, {"Display", "Anzeige"}, {"Picture", "Bild"}, {"Audio", "Ton"}, {"Controls", "Steuerung"},
+			{"Settings", "Einstellungen"}, {"Saving works in the game as on the PS2.", "Gespeichert wird im Spiel wie auf der PS2."}, {"Saving works in the game as on the PS2 (profile, options and progress).", "Gespeichert wird im Spiel wie auf der PS2 (Profil, Optionen und Fortschritt)."}, {"Display", "Anzeige"}, {"Picture", "Bild"}, {"Audio", "Ton"}, {"Controls", "Steuerung"},
 			{"Textures", "Texturen"}, {"Online", "Online"}, {"Save data", "Speicherstand"}, {"Language", "Sprache"},
 			{"Preset", "Voreinstellung"}, {"Remaster (sharp)", "Remaster (scharf)"}, {"Original look", "Original-Look"}, {"Performance", "Leistung"},
 			{"Internal resolution", "Interne Aufloesung"}, {"Aspect ratio", "Bildformat"}, {"Takes full effect after the next area change or restart.", "Wirkt ab dem naechsten Bereichswechsel bzw. Neustart voll."},
@@ -1542,7 +1542,7 @@ namespace ps2xmenu
 
 	struct Cfg
 	{
-		int upscale = 4, aspect = 0, cas = 1, casSharp = 25, tv = 0, filter = 2, aniso = 16, dither = 0;
+		int upscale = 4, aspect = 4, cas = 1, casSharp = 25, tv = 0, filter = 2, aniso = 16, dither = 0;
 		int sbB = 50, sbC = 50, sbS = 50, rumblePct = 100, hz = 50, volume = 100, camBlur = 1, nachzieh = 0;
 		bool fxaa = false, shadeboost = false, fullscreen = false, showFps = false, rumble = true, vsync = false, startMenu = false;   // start menu: the launcher already did the setup
 		int tri = 2;             // Trilinear filtering: 0 automatic (PCSX2 default), 1 as PS2, 2 forced (uses the mipmaps of replacement textures)
@@ -1641,6 +1641,7 @@ namespace ps2xmenu
 			}
 		}
 #endif
+		bool aspektAlt = false, aspektNeu = false; // 1.0.x saved 16:9 as default -> once to "fits any screen" (no bars on 16:10)
 		cfg.belVersion = 0; // if the version is not in the file, bindings saved there count as outdated
 		std::ifstream f(iniPath());
 		if (!f && cfgEnglish() && !std::getenv("PS2XGS_CFG")) { f.clear(); f.open(dir() + "/einstellungen.ini"); }
@@ -1654,8 +1655,9 @@ namespace ps2xmenu
 				continue;
 			const std::string k = line.substr(0, eq);
 			const int v = std::atoi(line.c_str() + eq + 1);
-			if (k == "aufloesung") cfg.upscale = std::clamp(v, 1, 8);
-			else if (k == "bildformat") cfg.aspect = std::clamp(v, 0, 3);
+			if (k == "aufloesung") cfg.upscale = std::clamp(v, 1, 9);   // 9 = auto (supersampling)
+			else if (k == "bildformat") { cfg.aspect = std::clamp(v, 0, 4); aspektAlt = cfg.aspect == 0; }
+			else if (k == "bildformat_v2") aspektNeu = true;
 			else if (k == "fxaa") cfg.fxaa = v != 0;
 			else if (k == "cas") cfg.cas = std::clamp(v, 0, 2);
 			else if (k == "cas_staerke") cfg.casSharp = std::clamp(v, 0, 100);
@@ -1715,6 +1717,7 @@ namespace ps2xmenu
 			else if (k == "online_passwort") cfg.onlinePw = line.substr(eq + 1);
 			else if (k == "online_favoriten") cfg.onlineFavs = line.substr(eq + 1);
 		}
+		if (aspektAlt && !aspektNeu) cfg.aspect = 4; // 1.0.x default 16:9 -> fit the screen (16:10 without bars)
 		belegungPruefen();
 	}
 	void belegungPruefen()
@@ -1731,8 +1734,8 @@ namespace ps2xmenu
 		Cfg c;
 		{ std::lock_guard<std::mutex> lk(m); c = cfg; }
 		std::ostringstream f;
-		f << "# " << cfgName() << " - Einstellungen (werden im Spielmenue geaendert, ESC/F1 oder Guide-Taste)\n"
-		  << "aufloesung=" << c.upscale << "\nbildformat=" << c.aspect << "\nfxaa=" << c.fxaa << "\ncas=" << c.cas
+		f << "# " << cfgName() << " - settings (changed in the game menu, ESC/F1 or the Guide button)\n"
+		  << "aufloesung=" << c.upscale << "\nbildformat=" << c.aspect << "\nbildformat_v2=1\nfxaa=" << c.fxaa << "\ncas=" << c.cas
 		  << "\ncas_staerke=" << c.casSharp << "\ndithering=" << c.dither << "\ntv_shader=" << c.tv << "\nfarbe=" << c.shadeboost << "\nhelligkeit=" << c.sbB
 		  << "\nkontrast=" << c.sbC << "\nsaettigung=" << c.sbS << "\ntexturfilter=" << c.filter << "\nanisotrop=" << c.aniso
 		  << "\nvollbild=" << c.fullscreen << "\nfps_anzeige=" << c.showFps << "\nvibration=" << c.rumble
@@ -1860,7 +1863,7 @@ namespace ps2xmenu
 			bool any = false;
 			for (const auto& e : std::filesystem::directory_iterator(dst, ec))
 				if (e.is_regular_file(ec) && !e.is_symlink(ec)) { if (!any) { std::filesystem::create_directories(alt, ec); any = true; } std::filesystem::rename(e.path(), alt / e.path().filename(), ec); }
-			std::ofstream(marker.string()) << "Dieser Ordner wird vom Spielmenue (Texturen) verwaltet - Inhalt sind Verweise auf texturquellen/.\n";
+			std::ofstream(marker.string()) << "This folder is managed by the game menu (Textures) - it only holds links to the texture sources.\n";
 		}
 		for (const auto& e : std::filesystem::directory_iterator(dst, ec))
 			if (e.is_symlink(ec)) std::filesystem::remove(e.path(), ec);
@@ -1875,12 +1878,45 @@ namespace ps2xmenu
 		return n;
 	}
 	// transfer into the PCSX2 settings (CPU thread or before the start)
+	// Internal resolution "auto" (9): about 1.5x the window height -> supersampling (smooth edges, sharp textures; better
+	// than FXAA in the comparison aa720). 1080p -> 4x, 1440p -> 5x, 4K -> 6x (cap: 8x at 4K is too much for mid GPUs).
+	std::atomic<int> autoStufe{0};
+	int autoAufloesung()
+	{
+		const u32 h = s_wi.surface_height ? s_wi.surface_height : 1080u;
+		// Steam Deck (Valve board): 2x like its default - battery and frame rate before supersampling
+		static const bool deck = [] {
+#ifdef __linux__
+			std::ifstream dv("/sys/devices/virtual/dmi/id/board_vendor"); std::string v; std::getline(dv, v);
+			const char* sd = std::getenv("SteamDeck"); return v.rfind("Valve", 0) == 0 || (sd && *sd == '1');
+#else
+			return false;
+#endif
+		}();
+		if (deck) return 2;
+		return std::clamp(static_cast<int>((h * 3u + 2u * 448u - 1u) / (2u * 448u)), 2, 6);
+	}
+	// window size changed (fullscreen, resize): with "auto" re-apply the settings when the level changes
+	void fensterGroesse()
+	{
+		int u;
+		{ std::lock_guard<std::mutex> lk(m); u = cfg.upscale; }
+		if (u == 9 && autoStufe.load() != 0 && autoAufloesung() != autoStufe.load())
+			applyPending.store(true);
+	}
 	void toSettings(SettingsInterface& si)
 	{
 		Cfg c;
 		{ std::lock_guard<std::mutex> lk(m); c = cfg; }
+		if (c.upscale == 9)
+		{
+			const int a = autoAufloesung();
+			autoStufe.store(a);
+			Console.WriteLn(fmt::format("[ps2xmenu] internal resolution auto: {}x (window height {})", a, s_wi.surface_height));
+			c.upscale = a;
+		}
 		// Aspect: 0 = 16:9 (the game's widescreen mode forced), 1 = as the game option, 2 = 4:3, 3 = fill the window
-		const bool wide = (c.aspect == 0) || (c.aspect == 1 && gameWide.load());
+		const bool wide = (c.aspect == 0) || (c.aspect == 4) || (c.aspect == 1 && gameWide.load());
 		si.SetFloatValue("EmuCore/GS", "upscale_multiplier", static_cast<float>(c.upscale));
 		si.SetStringValue("EmuCore/GS", "VideoCaptureCodec", envOr("PS2XGS_CAPTURE_CODEC", "libx264"));
 		si.SetIntValue("EmuCore/GS", "VideoCaptureBitrate", std::atoi(envOr("PS2XGS_CAPTURE_KBPS", "40000")));
@@ -1893,7 +1929,8 @@ namespace ps2xmenu
 		si.SetBoolValue("EmuCore/GS", "EnableAudioCapture", std::atoi(envOr("PS2XGS_CAPTURE_AUDIO", "1")) != 0);
 		si.SetIntValue("EmuCore/GS", "AudioCaptureBitrate", 192);
 		si.SetStringValue("EmuCore/GS", "AudioCaptureCodec", "aac");
-		si.SetStringValue("EmuCore/GS", "AspectRatio", c.aspect == 3 ? "Stretch" : (wide ? "16:9" : "4:3"));
+		// 4 = ultrawide: the game renders with the window's aspect ratio (ps2xgs_aspect_milli), the picture fills the window
+		si.SetStringValue("EmuCore/GS", "AspectRatio", (c.aspect == 3 || c.aspect == 4) ? "Stretch" : (wide ? "16:9" : "4:3"));
 		si.SetBoolValue("EmuCore/GS", "fxaa", c.fxaa);
 		si.SetIntValue("EmuCore/GS", "CASMode", c.cas);
 		si.SetIntValue("EmuCore/GS", "CASSharpness", c.casSharp);
@@ -2037,7 +2074,7 @@ static const int kBotSetsN = 9;
 		std::mutex om;
 		std::vector<Eintrag> liste;
 		std::atomic<bool> laeuft{false};
-		std::string meldung = "Noch nicht aktualisiert";
+		std::string meldung = "Not refreshed yet";
 		std::string spielStatus;            // from the runtime (ps2xgs_online_status)
 		std::atomic<bool> oeffnen{false};   // Runtime: the game reached the network configuration -> show the browser
 		bool vonSpielGeoeffnet = false;
@@ -2159,7 +2196,7 @@ static const int kBotSetsN = 9;
 				if (auto dl = HTTPDownloader::Create())
 				{
 					dl->CreateRequest(listenUrl(), [&](s32 code, const std::string&, HTTPDownloader::Request::Data data) {
-						if (code != 200) { fehler = "Serverliste nicht erreichbar (" + std::to_string(code) + ")"; return; }
+						if (code != 200) { fehler = "Server list not reachable (" + std::to_string(code) + ")"; return; }
 						std::string text(data.begin(), data.end());
 						size_t p = 0;
 						while (p < text.size())
@@ -2188,7 +2225,7 @@ static const int kBotSetsN = 9;
 				std::lock_guard<std::mutex> lk(om);
 				liste = std::move(v);
 				auswahl = -1;
-				meldung = (fehler.empty() ? "" : fehler + " - ") + std::to_string(erreichbar) + " von " + std::to_string(liste.size()) + " Servern erreichbar";
+				meldung = (fehler.empty() ? "" : fehler + " - ") + std::to_string(erreichbar) + " of " + std::to_string(liste.size()) + " servers reachable";
 				laeuft.store(false);
 			}).detach();
 		}
@@ -2816,7 +2853,7 @@ static const int kBotSetsN = 9;
 				ImGui::TextDisabled("%s:", tr("Preset"));
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Remaster (sharp)")))
-				{ c.upscale = 4; c.aniso = 16; c.filter = 2; c.cas = 1; c.casSharp = 25; c.fxaa = false; c.tv = 0; c.shadeboost = false; c.dither = 0; c.camBlur = 1; c.nachzieh = 0; c.scope = 1; c.aspect = 0; }
+				{ c.upscale = 4; c.aniso = 16; c.filter = 2; c.cas = 1; c.casSharp = 25; c.fxaa = false; c.tv = 0; c.shadeboost = false; c.dither = 0; c.camBlur = 1; c.nachzieh = 0; c.scope = 1; c.aspect = 4; }
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Original look")))
 				{ c.upscale = 1; c.aniso = 0; c.filter = 2; c.cas = 0; c.fxaa = false; c.tv = 5; c.shadeboost = false; c.aspect = 2; c.dither = 2; c.camBlur = 1; c.nachzieh = 1; c.scope = 0; }
@@ -2824,12 +2861,12 @@ static const int kBotSetsN = 9;
 				if (ImGui::Button(tr("Performance")))
 				{ c.upscale = 2; c.aniso = 4; c.filter = 2; c.cas = 1; c.casSharp = 40; c.fxaa = false; c.tv = 0; }
 				head(tr("Resolution & filtering"));
-				static const char* kRes[] = {"1x  original (512x448)", "2x  (~720p)", "3x  (~1080p)", "4x  (~1440p)", "5x", "6x  (~4K)", "7x", "8x  (~5K)"};
+				static const char* kRes[] = {"1x  original (512x448)", "2x  (~720p)", "3x  (~1080p)", "4x  (~1440p)", "5x", "6x  (~4K)", "7x", "8x  (~5K)", "Auto (best for this screen, smooth edges)"};
 				int r = c.upscale - 1;
-				if (combo(tr("Internal resolution"), &r, kRes, 8)) c.upscale = r + 1;
-				static const char* kAspEn[] = {"16:9 widescreen (more view)", "As set in the game's options", "4:3 original", "Fill window (stretched)"};
-				static const char* kAspDe[] = {"16:9 Breitbild (mehr Sichtfeld)", "Wie im Spiel-Optionsmenue", "4:3 Original", "Fenster fuellen (gestreckt)"};
-				combo(tr("Aspect ratio"), &c.aspect, sprache.load() == 1 ? kAspDe : kAspEn, 4);
+				if (combo(tr("Internal resolution"), &r, kRes, 9)) c.upscale = r + 1;
+				static const char* kAspEn[] = {"16:9 widescreen (more view)", "As set in the game's options", "4:3 original", "Fill window (stretched)", "Fit any screen (16:9, 16:10, 21:9, 32:9)"};
+				static const char* kAspDe[] = {"16:9 Breitbild (mehr Sichtfeld)", "Wie im Spiel-Optionsmenue", "4:3 Original", "Fenster fuellen (gestreckt)", "Passt zu jedem Bildschirm (16:9, 16:10, 21:9, 32:9)"};
+				combo(tr("Aspect ratio"), &c.aspect, sprache.load() == 1 ? kAspDe : kAspEn, 5);
 				if (c.aspect != before.aspect)
 					ImGui::TextDisabled("%s", tr("Takes full effect after the next area change or restart."));
 				static const char* kFiltEn[] = {"Pixelated (nearest)", "Bilinear (always)", "Bilinear (as PS2)", "Bilinear (no sprites)"};
@@ -3057,7 +3094,7 @@ static const int kBotSetsN = 9;
 			if (ImGui::BeginTabItem(tr("Save data")))
 			{
 				ImGui::TextWrapped("%s", memcardInfo().c_str());
-				ImGui::TextDisabled("%s", speicherHinweis());
+				ImGui::TextDisabled("%s", tr(speicherHinweis()));
 				ImGui::TextDisabled("%s", tr("A backup copy of the save data is made at every start."));
 				ImGui::EndTabItem();
 			}
@@ -3471,13 +3508,13 @@ static void ps2xKey(KeySym ks, bool down, bool alt)
 			{ std::lock_guard<std::mutex> lk(ps2xmenu::m); on = ps2xmenu::cfg.showFps = !ps2xmenu::cfg.showFps; }
 			ps2xmenu::applyPending.store(true);
 			ps2xmenu::save();
-			ps2xhot::toast(on ? "FPS: an / on" : "FPS: aus / off");
+			ps2xhot::toast(on ? "FPS: on" : "FPS: off");
 		}
 		else if (down && ks == XK_F10)
 		{
 			const bool on = !ps2xhot::turbo.load();
 			ps2xhot::turbo.store(on);
-			ps2xhot::toast(on ? "Turbo: an / on (F10)" : "Turbo: aus / off");
+			ps2xhot::toast(on ? "Turbo: on (F10)" : "Turbo: off");
 		}
 		else if (down && ks == XK_F7)
 		{
@@ -3638,6 +3675,7 @@ static LRESULT CALLBACK ps2xWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			// start size, the menu then took the mouse at the wrong place). Only once the CPU thread runs (MTGS open).
 			if (LOWORD(lp) > 0 && HIWORD(lp) > 0 && ps2xgsq::aktiv.load())
 			{
+				ps2xmenu::fensterGroesse();
 				const u32 w = LOWORD(lp), h = HIWORD(lp);
 				gsCall([w, h]() { if (g_gs_device) GSResizeDisplayWindow(w, h, 1.0f); });
 			}
@@ -3973,6 +4011,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 					const XConfigureEvent& configure = event.xconfigure;
 					s_wi.surface_width = static_cast<u32>(configure.width);
 					s_wi.surface_height = static_cast<u32>(configure.height);
+					ps2xmenu::fensterGroesse();
 					break;
 				}
 				case DestroyNotify:
@@ -4193,7 +4232,7 @@ namespace ps2xdiag
 		std::snprintf(b, sizeof(b), "ungueltiger CRT-Parameter: %ls in %ls (%ls:%u)", expr ? expr : L"?", fn ? fn : L"?", file ? file : L"?", line);
 		stapel(b);
 	}
-	static void beiTerminate() { stapel("std::terminate (Ausnahme nicht gefangen)"); std::abort(); }
+	static void beiTerminate() { stapel("std::terminate (uncaught exception)"); std::abort(); }
 	static LONG WINAPI beiAusnahme(EXCEPTION_POINTERS* e)
 	{
 		const DWORD c = e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionCode : 0;
@@ -4206,7 +4245,7 @@ namespace ps2xdiag
 			if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCSTR>(adr), &m) && m)
 				GetModuleFileNameA(m, name, MAX_PATH);
 			const char* kurz = std::strrchr(name, '\\');
-			std::snprintf(b, sizeof(b), "Ausnahme 0x%08lX bei %s+0x%llx", c, kurz ? kurz + 1 : name,
+			std::snprintf(b, sizeof(b), "exception 0x%08lX at %s+0x%llx", c, kurz ? kurz + 1 : name,
 				static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(adr) - reinterpret_cast<uintptr_t>(m)));
 			stapel(b);
 		}
@@ -4383,11 +4422,11 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	if (VMManager::HasValidVM())
 	{
-		char b[64]; std::snprintf(b, sizeof(b), "[ps2xgs] start: VM bereit (%d ms)", ms);
+		char b[64]; std::snprintf(b, sizeof(b), "[ps2xgs] start: VM ready (%d ms)", ms);
 		PS2XDIAG(b);
 	}
 	else
-		PS2XDIAG("[ps2xgs] start: VM nach 30 s nicht bereit");
+		PS2XDIAG("[ps2xgs] start: VM not ready after 30 s");
 	// PS2XGS_VM_PFLICHT=1 (Windows launcher): without a valid VM (e.g. the graphics device could not be created) report
 	// failure so that the launcher can restart with another renderer instead of showing a black window
 	if (const char* e = std::getenv("PS2XGS_VM_PFLICHT"); e && *e == '1' && !VMManager::HasValidVM())
@@ -4549,7 +4588,19 @@ PS2XGS_API int ps2xgs_wide_mode()
 		return 0;
 	int a;
 	{ std::lock_guard<std::mutex> lk(ps2xmenu::m); a = ps2xmenu::cfg.aspect; }
-	return a == 0 ? 1 : a == 2 ? 2 : 0;
+	return (a == 0 || a == 4) ? 1 : a == 2 ? 2 : 0;
+}
+// Ultrawide (aspect option 4): width/height of the window x 1000, so the game renders with exactly that aspect ratio.
+// 0 = not ultrawide (16:9 or 4:3 as before).
+PS2XGS_API int ps2xgs_aspect_milli()
+{
+	if (!ps2xmenu::active.load())
+		return 0;
+	int a;
+	{ std::lock_guard<std::mutex> lk(ps2xmenu::m); a = ps2xmenu::cfg.aspect; }
+	if (a != 4 || s_wi.surface_width == 0 || s_wi.surface_height == 0)
+		return 0;
+	return static_cast<int>(static_cast<u64>(s_wi.surface_width) * 1000u / s_wi.surface_height);
 }
 // The game reports its video mode -> switch the output aspect ratio to match
 PS2XGS_API void ps2xgs_game_wide(int wide)
