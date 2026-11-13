@@ -1,7 +1,7 @@
 #include <string_view>
-// ps2x-gsbridge: PCSX2-GS als Bibliothek fuer einen nativen PS2-Port (SotC Recomp).
-// Abgeleitet von pcsx2-gsrunner/Main.cpp (PCSX2 Dev Team, GPL-3.0+): Host-Schnittstelle, Konfiguration und
-// X11-Fenster bleiben, statt eines Dump-Files speist der Port Pakete live ein (GSDumpReplayer Live-Modus).
+// ps2x-gsbridge: the PCSX2 GS as a library for a native PS2 port (SotC Recomp, TS2 Recomp).
+// Derived from pcsx2-gsrunner/Main.cpp (PCSX2 Dev Team, GPL-3.0+): host interface, configuration and the
+// X11 window remain; instead of a dump file the port feeds packets live (GSDumpReplayer live mode).
 // SPDX-License-Identifier: GPL-3.0+
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
@@ -86,6 +86,13 @@ namespace GSRunner
 
 static constexpr u32 WINDOW_WIDTH = 1280;
 static constexpr u32 WINDOW_HEIGHT = 960;
+// PS2XGS_WINDOW=WxH (e.g. 1280x720 for showcase recordings): start size of the X11 window
+static u32 ps2xFensterMass(bool hoehe)
+{
+	static const std::pair<u32, u32> m = [] { unsigned w = 0, h = 0; const char* e = std::getenv("PS2XGS_WINDOW");
+		if (e && std::sscanf(e, "%ux%u", &w, &h) == 2 && w >= 320 && h >= 240) return std::make_pair(static_cast<u32>(w), static_cast<u32>(h)); return std::make_pair(WINDOW_WIDTH, WINDOW_HEIGHT); }();
+	return hoehe ? m.second : m.first;
+}
 
 static MemorySettingsInterface s_settings_interface;
 
@@ -134,14 +141,14 @@ static float s_perf_sum_gpu_usage = 0.0f;
 bool GSRunner::InitializeConfig()
 {
 	EmuFolders::SetAppRoot();
-	// ps2x: Ressourcen (Shader, Schriften, GameDB) liegen neben der Bibliothek, nicht neben dem Spielprogramm
+	// ps2x: resources (shaders, fonts, GameDB) sit next to the library, not next to the game executable
 	if (const char* root = std::getenv("PS2XGS_APPROOT"); root && *root)
 		EmuFolders::AppRoot = root;
 	if (!EmuFolders::SetResourcesDirectory() || !EmuFolders::SetDataDirectory(nullptr))
 		return false;
 #ifdef _WIN32
-	// Eigener Datenordner statt Dokumente\PCSX2: eine installierte PCSX2-Version teilt sich sonst Shader-Cache,
-	// Einstellungen und Ressourcen mit dem Port (anderes Format, andere Version). PS2XGS_DATAROOT ueberschreibt.
+	// Own data directory instead of Documents\PCSX2: otherwise an installed PCSX2 shares its shader cache,
+	// settings and resources with the port (different format, different version). PS2XGS_DATAROOT overrides it.
 	{
 		std::string dr;
 		if (const char* e = std::getenv("PS2XGS_DATAROOT"); e && *e) dr = e;
@@ -340,7 +347,7 @@ void Host::BeginPresentFrame()
 
 		s_total_frames++;
 
-		// PS2XGS_STAT=1: alle 50 Bilder die PCSX2-Zaehler ausgeben (Draws, Render-Paesse, Barrieren, Kopien, Uploads, Rueckleser)
+		// PS2XGS_STAT=1: print the PCSX2 counters every 50 frames (draws, render passes, barriers, copies, uploads, readbacks)
 		static const bool statOn = [] { const char* e = std::getenv("PS2XGS_STAT"); return e && *e == '1'; }();
 		if (statOn && (s_total_frames % 50) == 0)
 			Console.WriteLn("[ps2xgs-stat] frames=%llu draws=%llu calls=%llu passes=%llu barriers=%llu copies=%llu uploads=%llu readbacks=%llu",
@@ -383,7 +390,7 @@ void Host::OnGameChanged(const std::string& title, const std::string& elf_overri
 
 void Host::OnPerformanceMetricsUpdated()
 {
-	// PS2XGS_PERFLOG=1: echte Spiel-Bildrate (wie die FPS-Anzeige) und VBlanks/s protokollieren
+	// PS2XGS_PERFLOG=1: log the real game frame rate (as in the FPS display) and VBlanks/s
 	static const bool perflog = std::getenv("PS2XGS_PERFLOG") != nullptr;
 	if (perflog)
 		Console.WriteLn(fmt::format("[ps2xperf] FPS {:.2f} ({}) | VPS {:.2f} | Bildzeit {:.2f} ms", PerformanceMetrics::GetInternalFPS(),
@@ -930,7 +937,7 @@ void GSRunner::SettingsOverride()
 
 	// we don't need any sound output
 	s_settings_interface.SetStringValue("SPU2/Output", "OutputModule", "nullout");
-	s_settings_interface.SetStringValue("SPU2/Output", "Backend", "Null"); // Ton nur im echten Spiel (ps2xgs_start)
+	s_settings_interface.SetStringValue("SPU2/Output", "Backend", "Null"); // sound only in the real game (ps2xgs_start)
 
 	// none of the bindings are going to resolve to anything
 	Pad::ClearPortBindings(s_settings_interface, 0);
@@ -941,10 +948,12 @@ void GSRunner::SettingsOverride()
 	s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", true);
 	s_settings_interface.SetBoolValue("Logging", "EnableVerbose", true);
 
-	// and show some stats :)
-	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowFPS", true);
-	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowResolution", true);
-	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowGSStats", true);
+	// nothing of PCSX2's own on-screen display in the picture (FPS/resolution only when switched on in the menu, F9)
+	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowFPS", false);
+	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowResolution", false);
+	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowGSStats", false);
+	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowSettings", false);
+	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowInputs", false);
 
 	// remove memory cards, so we don't have sharing violations
 	for (u32 i = 0; i < 2; i++)
@@ -1103,7 +1112,7 @@ void GSRunner::StopPlatformMessagePump()
 
 #elif defined(_WIN32) || defined(__linux__)
 #ifdef _WIN32
-// ps2x Windows: gleiche Spielmenue-/Eingabelogik wie unter Linux, Fenster ueber Win32 (eigener UI-Thread)
+// ps2x Windows: same game menu/input logic as on Linux, window through Win32 (own UI thread)
 #include <windowsx.h>
 #include <direct.h>
 #include <sys/stat.h>
@@ -1113,14 +1122,14 @@ using KeySym = unsigned long;
 #ifndef None
 #define None 0
 #endif
-static Display* s_display = nullptr; // = Fenster vorhanden (zeigt auf das HWND)
+static Display* s_display = nullptr; // = window exists (points to the HWND)
 static Window s_window = None;
 static int ps2x_mkdir(const char* p, int) { return _mkdir(p); }
 static int ps2x_setenv(const char* k, const char* v, int ow) { if (!ow && std::getenv(k)) return 0; return _putenv_s(k, v); }
 #ifndef S_ISDIR
 #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
 #endif
-// X11-Tastensymbole (gleiche Werte), damit die gemeinsame Tastenlogik unveraendert bleibt
+// X11 key symbols (same values) so that the shared key logic stays unchanged
 enum : KeySym { XK_BackSpace = 0xff08, XK_Tab = 0xff09, XK_Return = 0xff0d, XK_Escape = 0xff1b, XK_Left = 0xff51, XK_Up = 0xff52,
 	XK_Right = 0xff53, XK_Down = 0xff54, XK_Print = 0xff61, XK_KP_Enter = 0xff8d, XK_F1 = 0xffbe, XK_F7 = 0xffc4, XK_F8 = 0xffc5, XK_F9 = 0xffc6, XK_F10 = 0xffc7,
 	XK_F11 = 0xffc8, XK_F12 = 0xffc9, XK_Shift_L = 0xffe1, XK_Shift_R = 0xffe2, XK_space = 0x20,
@@ -1138,7 +1147,7 @@ static int ps2x_setenv(const char* k, const char* v, int ow) { return setenv(k, 
 static WindowInfo s_wi;
 static std::atomic<bool> s_shutdown_requested{false};
 
-// ---- ps2x: Spielmenue (ImGui im Spielfenster, Gamepad/Tastatur/Maus), Einstellungen in ~/.config/sotc-recomp ----
+// ---- ps2x: game menu (ImGui in the game window, gamepad/keyboard/mouse), settings in ~/.config/<name> ----
 #include "imgui.h"
 #include "common/HTTPDownloader.h"
 #ifdef _WIN32
@@ -1156,10 +1165,60 @@ static std::atomic<bool> s_shutdown_requested{false};
 #include <filesystem>
 #include <set>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <fstream>
 #include <sys/stat.h>
-namespace ps2xosd { std::atomic<u32> btns{0}, axes{0x80808080u}, keyBtns{0}; } // zuletzt ans Spiel gelieferte Eingabe
+namespace ps2xosd { std::atomic<u32> btns{0}, axes{0x80808080u}, keyBtns{0}; std::atomic<bool> ego{false}, zoomAktiv{false}, mausDa{false};
+	// Online+ impact: time of the last hit / kill reported by the game (steady_clock ms), counters to detect new events
+	std::atomic<long long> trefferMs{0}, killMs{0}; std::atomic<int> trefferN{0}, killN{0};
+	// Online+ arcade layer: damage edge flash, multi-kill / streak announcer
+	std::atomic<long long> schadenMs{0}; std::atomic<int> schadenStaerke{0}, todN{0};
+	std::mutex am; std::string ansText; long long ansMs = 0; int ansStufe = 0; int kette = 0, serie = 0; long long letzterKillMs = 0;
+	long long jetztMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); } }
+// Online+ fonts (SIL OFL, shipped in resources/fonts): Michroma = wide arcade headline face, Rajdhani = compact text face.
+// Loaded lazily on the GUI thread; reloaded if the font atlas was rebuilt. nullptr -> default font.
+namespace ps2xschrift
+{
+	ImFont* laden(const char* datei, ImFont*& f)
+	{
+		ImFontAtlas* at = ImGui::GetIO().Fonts;
+		if (f) { for (ImFont* x : at->Fonts) if (x == f) return f; f = nullptr; }
+		static int fehlversuche = 0;
+		if (fehlversuche > 8) return nullptr;
+		const std::string p = EmuFolders::GetOverridableResourcePath(std::string("fonts" FS_OSPATH_SEPARATOR_STR) + datei);
+		ImFontConfig fc; fc.OversampleH = 2;
+		f = at->AddFontFromFileTTF(p.c_str(), 0.0f, &fc);
+		if (!f) ++fehlversuche;
+		return f;
+	}
+	ImFont* kopf() { static ImFont* f = nullptr; return laden("Michroma-Regular.ttf", f); }
+	ImFont* text() { static ImFont* f = nullptr; return laden("Rajdhani-SemiBold.ttf", f); }
+	ImFont* fett() { static ImFont* f = nullptr; return laden("Rajdhani-Bold.ttf", f); }
+}
+// Online+ progression (local): XP for hits/kills, levels, saved in stats.ini next to the settings
+namespace ps2xstats { void treffer(); void kill(); int level(); long long xp(); long long xpFuer(int lvl); int kills(); int hits(); } // input last delivered to the game
+// Online+ ranks: one title per 5 levels (level 50 = Legend)
+static const char* ps2xRang(int lv)
+{
+	static const char* r[] = {"RECRUIT", "PRIVATE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL", "COMMANDER", "GENERAL", "LEGEND"};
+	return r[std::clamp(lv / 5, 0, 10)];
+}
+static ImU32 ps2xRangFarbe(int lv)
+{
+	static const ImU32 f[] = {IM_COL32(170, 170, 170, 255), IM_COL32(150, 200, 120, 255), IM_COL32(110, 200, 170, 255), IM_COL32(100, 170, 255, 255), IM_COL32(150, 130, 255, 255),
+		IM_COL32(220, 120, 255, 255), IM_COL32(255, 120, 170, 255), IM_COL32(255, 150, 80, 255), IM_COL32(255, 200, 60, 255), IM_COL32(255, 230, 120, 255), IM_COL32(255, 245, 200, 255)};
+	return f[std::clamp(lv / 5, 0, 10)];
+}
+// Online+ killfeed / scoreboard data from the game (ps2xgs_text)
+namespace ps2xfeed
+{
+	struct Zeile { std::string killer, opfer; int fl; long long ms; };
+	std::mutex m; std::vector<Zeile> zeilen; std::string tafel;
+	std::atomic<bool> tab{false};          // Tab held (keyboard) -> Online+ scoreboard
+	std::atomic<long long> tafelMs{0};     // last scoreboard data from the game (= a match is running)
+	bool imMatch() { return ps2xosd::jetztMs() - tafelMs.load() < 2000; }
+}
 // Hotkeys: F9 FPS-Anzeige, F10 Turbo (ohne Bildratenbegrenzung), F12 Screenshot; kurze Einblendung (Toast)
 namespace ps2xhot
 {
@@ -1168,10 +1227,10 @@ namespace ps2xhot
 	std::string toastText;
 	std::chrono::steady_clock::time_point toastAt{};
 	void toast(std::string t) { std::lock_guard<std::mutex> lk(tm); toastText = std::move(t); toastAt = std::chrono::steady_clock::now(); }
-	// Videoaufnahme (PCSX2 GSCapture ueber ffmpeg): F8 an/aus, PS2XGS_CAPTURE=<datei.mp4> startet beim ersten Bild.
-	// Interne Aufloesung, 60 Bilder/s, mit Ton. Codec/Bitrate: PS2XGS_CAPTURE_CODEC (Standard libx264), PS2XGS_CAPTURE_KBPS (Standard 40000).
-	// Freie Kamera (Dev-Modus): F7 an/aus, PS2XGS_FREECAM=1 ab Start. Die Laufzeit fliegt dann den Spieler mit Maus + WASD
-	// durch den Level (Space/Strg hoch/runter, Shift schneller), Spieleingabe ist eingefroren.
+	// Video recording (PCSX2 GSCapture through ffmpeg): F8 on/off, PS2XGS_CAPTURE=<file.mp4> starts at the first frame.
+	// Internal resolution, 60 frames/s, with sound. Codec/bitrate: PS2XGS_CAPTURE_CODEC (default libx264), PS2XGS_CAPTURE_KBPS (default 40000).
+	// Free camera (dev mode): F7 on/off, PS2XGS_FREECAM=1 from the start. The runtime then flies the player through the
+	// level with mouse + WASD (Space/Ctrl up/down, Shift faster); game input is frozen.
 	std::atomic<bool> freecam{[] { const char* e = std::getenv("PS2XGS_FREECAM"); return e && *e == '1'; }()};
 	std::atomic<bool> aufnahme{false};
 	std::string aufnahmeDatei;
@@ -1179,11 +1238,11 @@ namespace ps2xhot
 	{
 		aufnahmeDatei = datei;
 		aufnahme.store(true);
-		// Direkt mit 59.94 Hz: im Live-Betrieb der Bruecke kennt der GS-Zustand den TV-Modus nicht immer (SMODE1 noch leer),
-		// dann liefert GSBeginCapture fps = 0 und der Encoder lehnt ab ("timebase not set").
+		// 59.94 Hz directly: in the bridge's live mode the GS state does not always know the TV mode (SMODE1 still empty),
+		// then GSBeginCapture returns fps = 0 and the encoder refuses ("timebase not set").
 		MTGS::RunOnGSThread([datei]() {
 			if (!g_gs_renderer) return;
-			// Aufnahme-Einstellungen direkt in GSConfig (die Werte aus toSettings kommen hier nicht an)
+			// Recording settings directly in GSConfig (the values from toSettings do not arrive here)
 			const auto envOr = [](const char* k, const char* d) { const char* e = std::getenv(k); return (e && *e) ? e : d; };
 			GSConfig.VideoCaptureCodec = envOr("PS2XGS_CAPTURE_CODEC", "libx264");
 			GSConfig.VideoCaptureBitrate = std::atoi(envOr("PS2XGS_CAPTURE_KBPS", "40000"));
@@ -1191,14 +1250,14 @@ namespace ps2xhot
 			GSConfig.VideoCaptureParameters = envOr("PS2XGS_CAPTURE_PARAMS", "crf=16:preset=veryfast");
 			GSConfig.CaptureContainer = "mp4";
 			GSConfig.EnableVideoCapture = true;
-			// Ton: aus in Testlaeufen ohne Taktung (PS2XGS_CAPTURE_AUDIO=0) - sonst laeuft der Ton dem Bild davon, der Tonpuffer
-			// blockiert den Spiel-Thread in DeliverAudioPacket und nichts geht mehr (gdb-Stacks ts2_366)
+			// Sound: off in unpaced test runs (PS2XGS_CAPTURE_AUDIO=0) - otherwise the sound runs away from the picture, the audio
+			// buffer blocks the game thread in DeliverAudioPacket and everything stalls (gdb stacks ts2_366)
 			GSConfig.EnableAudioCapture = std::atoi(envOr("PS2XGS_CAPTURE_AUDIO", "1")) != 0;
 			GSConfig.AudioCaptureCodec = "aac";
 			GSConfig.AudioCaptureBitrate = 192;
 #ifdef _WIN32
-			// FFmpeg-DLLs liegen in <gs>\ffmpeg\ und NICHT im Suchpfad: gleichnamige DLLs im PATH koennten sonst von fremden
-			// Modulen im Prozess (Overlays, Aufnahme-Hooks) geladen werden. Hier mit vollem Pfad vorladen; PCSX2 findet sie dann.
+			// The FFmpeg DLLs are in <gs>\ffmpeg\ and NOT on the search path: DLLs of the same name in PATH could otherwise be
+			// loaded by foreign modules in the process (overlays, capture hooks). Preload them here by full path; PCSX2 then finds them.
 			{
 				const std::string root = envOr("PS2XGS_APPROOT", ".");
 				for (const char* n : {"avutil-60.dll", "swresample-6.dll", "swscale-9.dll", "avcodec-62.dll", "avformat-62.dll"})
@@ -1209,10 +1268,10 @@ namespace ps2xhot
 			}
 #endif
 			GSVector2i res = g_gs_renderer->GetInternalResolution();
-			if (res.x <= 0 || res.y <= 0) // noch kein Bild: aus Skalierung x PS2-Bild (640x448) ableiten
+			if (res.x <= 0 || res.y <= 0) // no frame yet: derive from scale x PS2 picture (640x448)
 				res = GSVector2i(static_cast<int>(640 * EmuConfig.GS.UpscaleMultiplier), static_cast<int>(448 * EmuConfig.GS.UpscaleMultiplier));
-			// Aufnahmehoehe begrenzen (Standard 1080 Zeilen, PS2XGS_CAPTURE_HOEHE): in voller 6x/8x-Aufloesung schafft x264 keine
-			// 60 Bilder/s, das Spiel wartet dann auf den Encoder (niedrige Bildrate, mit Ton blockiert der Tonpuffer)
+			// Limit the recording height (default 1080 lines, PS2XGS_CAPTURE_HOEHE): at full 6x/8x resolution x264 cannot do
+			// 60 frames/s; the game then waits for the encoder (low frame rate, and with sound the audio buffer blocks)
 			const int maxH = std::max(448, std::atoi(envOr("PS2XGS_CAPTURE_HOEHE", "1080")));
 			if (res.y > maxH) { res.x = static_cast<int>(static_cast<long long>(res.x) * maxH / res.y); res.y = maxH; }
 			res.x &= ~1; res.y &= ~1;
@@ -1223,7 +1282,7 @@ namespace ps2xhot
 		});
 		toast("Recording: " + datei + "  (F8 stops)");
 	}
-	// Beim Beenden: laufende Aufnahme sauber abschliessen (moov-Atom), sonst ist die Datei unlesbar
+	// On exit: finish a running recording cleanly (moov atom), otherwise the file is unreadable
 	void aufnahmeBeenden()
 	{
 		if (!aufnahme.exchange(false)) return;
@@ -1253,7 +1312,7 @@ namespace ps2xhot
 		const std::string d = h + "/.local/share/ts2-recomp-screenshots"; ps2x_mkdir(d.c_str(), 0755); return d;
 	}
 }
-// Steam Deck / SteamOS-Spielmodus erkennen (Steam setzt SteamDeck=1; sonst Board-Hersteller "Valve")
+// Detect the Steam Deck / SteamOS game mode (Steam sets SteamDeck=1; otherwise board vendor "Valve")
 static bool ps2xAufSteamDeck()
 {
 	static const bool deck = [] {
@@ -1272,26 +1331,48 @@ static bool ps2xAufSteamDeck()
 	return deck;
 }
 
+// Overlays inside the game picture (not the window): PCSX2 letter-/pillarboxes the picture; everything drawn
+// through ps2xImSpiel uses the picture size and is shifted into it when the scope ends.
+void ps2xSpielRect(float* out4);   // GSRenderer.cpp
+struct ps2xImSpiel
+{
+	ImDrawList* dl; int v0; ImVec2 o, ds;
+	explicit ps2xImSpiel(ImDrawList* d) : dl(d), v0(d->VtxBuffer.Size)
+	{
+		const ImGuiIO& io = ImGui::GetIO();
+		float r[4] = {0, 0, 0, 0}; ps2xSpielRect(r);
+		const float ww = g_gs_device ? static_cast<float>(g_gs_device->GetWindowWidth()) : io.DisplaySize.x;
+		const float sk = ww > 0.0f ? io.DisplaySize.x / ww : 1.0f;
+		if (r[2] - r[0] < 16.0f || r[3] - r[1] < 16.0f) { o = ImVec2(0, 0); ds = io.DisplaySize; return; }
+		o = ImVec2(std::max(0.0f, r[0] * sk), std::max(0.0f, r[1] * sk));
+		ds = ImVec2(std::min(io.DisplaySize.x - o.x, (r[2] - r[0]) * sk), std::min(io.DisplaySize.y - o.y, (r[3] - r[1]) * sk));
+	}
+	~ps2xImSpiel() { for (int i = v0; i < dl->VtxBuffer.Size; ++i) { dl->VtxBuffer[i].pos.x += o.x; dl->VtxBuffer[i].pos.y += o.y; } }
+};
 namespace ps2xmenu
 {
 	std::atomic<bool> open{false};
 	std::atomic<bool> applyPending{false};
 	std::atomic<bool> fsPending{false};
-	std::atomic<u32> nav{0};          // gehaltene Menue-Tasten: 1 hoch 2 runter 4 links 8 rechts 16 OK 32 zurueck
-	std::atomic<int> lernAktion{-1}, lernPlatz{0};   // Belegung: naechste Taste/Maustaste fuer diese Aktion
-	std::atomic<double> lernAb{0.0};                  // ImGui-Zeit, ab der Eingaben zaehlen (nicht der eigene Klick)
-	std::atomic<int> lernCode{0};                     // vom Fenster-Thread erfasster Code (0 = noch keiner, -1 = Abbruch)
+	std::atomic<u32> nav{0};          // held menu keys: 1 up 2 down 4 left 8 right 16 OK 32 back
+	std::atomic<int> lernAktion{-1}, lernPlatz{0};   // Binding: next key/mouse button for this action
+	std::atomic<double> lernAb{0.0};                  // ImGui time from which input counts (not the click itself)
+	std::atomic<int> lernCode{0};                     // code captured by the window thread (0 = none yet, -1 = cancelled)
 	std::atomic<int> mouseX{-1}, mouseY{-1};
 	std::atomic<u32> mouseBtn{0};
 	std::atomic<int> wheel{0};
-	std::atomic<bool> latch{false};   // nach dem Schliessen: Spiel-Eingabe erst nach Loslassen
+	std::atomic<bool> latch{false};   // after closing: game input only after everything is released
 	std::atomic<bool> gameWide{false};
-	std::atomic<bool> active{false};   // Menue/Einstellungen aktiv (nicht in Testlaeufen ohne Fenster) // Spiel rendert im eigenen 16:9-Modus (set_screen_wide_and_progressive)
+	std::atomic<bool> active{false};   // menu/settings active (not in windowless test runs) // the game renders in its own 16:9 mode (set_screen_wide_and_progressive)
 
-	// Spielbezogene Texte per Umgebung (Startskript des jeweiligen Ports), Standard: SotC
+	// Game-specific texts through the environment (start script of each port), default: SotC
 	const char* envOr(const char* k, const char* d) { const char* e = std::getenv(k); return (e && *e) ? e : d; }
 	const char* spielTitel() { return envOr("PS2XGS_TITEL", "SHADOW OF THE COLOSSUS"); }
 	const char* cfgName() { return envOr("PS2XGS_CFGNAME", "sotc-recomp"); }
+	// Edition: "onlineplus" = TimeSplitters 2 Online+ (separate game: impact effects, progression, Online+ menu); otherwise original
+	bool onlinePlus() { static const bool v = [] { const char* e = std::getenv("PS2XGS_EDITION"); const char* t = std::getenv("TS2_IMPACT"); return (e && std::string_view(e) == "onlineplus") || (t && *t == '1'); }(); return v; }
+	std::atomic<bool> opOeffnen{false};   // the game's main menu item "Online+" was selected
+	std::atomic<int> botAnfrage{0};       // quick bot match requested in the hub (code for the runtime, option 18)
 	const char* startName() { return envOr("PS2XGS_STARTNAME", "the launcher"); }
 	const char* speicherHinweis() { return envOr("PS2XGS_SPEICHERHINWEIS", "Saving works in the game as on the PS2."); }
 
@@ -1327,7 +1408,7 @@ namespace ps2xmenu
 			{"Gamepad", "Gamepad"}, {"Rumble", "Vibration"}, {"Rumble strength", "Vibrationsstaerke"},
 			{"Any modern gamepad is detected automatically (Xbox, PlayStation, Switch, Deck).", "Jedes moderne Gamepad wird automatisch erkannt (Xbox, PlayStation, Switch, Deck)."},
 			{"Mouse", "Maus"}, {"Mouse aiming", "Maus-Zielen"}, {"Sensitivity", "Empfindlichkeit"}, {"Zoom sensitivity", "Zoom-Empfindlichkeit"},
-			{"Invert vertical", "Oben/unten vertauscht"}, {"Original crosshair while using the mouse (holds aim mode)", "Original-Fadenkreuz beim Maus-Spielen (Zielmodus halten)"},
+			{"Invert vertical", "Oben/unten vertauscht"}, {"Always hold aim mode (original crosshair, slower walking)", "Zielmodus immer halten (Original-Fadenkreuz, langsameres Laufen)"}, {"Crosshair", "Fadenkreuz"}, {"Sniper scope", "Zielfernrohr"}, {"Impact effects (Online+)", "Treffer-Effekte (Online+)"}, {"Extra feedback on top of the original game. Off = the game exactly as on the PS2.", "Zusaetzliches Feedback zum Originalspiel. Aus = das Spiel genau wie auf der PS2."}, {"Hit and kill markers", "Treffer- und Kill-Marker"}, {"Play online", "Online spielen"}, {"Open server browser", "Serverbrowser oeffnen"}, {"Join a server, then pick Network Game in the game.", "Server beitreten, dann im Spiel Netzwerkspiel waehlen."}, {"Online play is not available in this start mode.", "Online-Spiel ist in diesem Startmodus nicht verfuegbar."}, {"Effects", "Effekte"}, {"BOT MATCH", "BOT-MATCH"}, {"* = has to be unlocked in the game first (Arcade League / Challenge).", "* = muss erst im Spiel freigeschaltet werden (Arcade-Liga / Challenge)."}, {"Mode", "Modus"}, {"Map", "Karte"}, {"START BOT MATCH", "BOT-MATCH STARTEN"}, {"Jump straight into a match against bots. Pick a mode and a map, the game sets everything up for you.", "Direkt in ein Match gegen Bots. Modus und Karte waehlen, das Spiel stellt alles fuer dich ein."}, {"Don't touch the controller for a few seconds while the menus run.", "Ein paar Sekunden nichts druecken, waehrend die Menues durchlaufen."}, {"Opponents", "Gegner"}, {"Next rank:", "Naechster Rang:"}, {"Recoil punch when firing", "Rueckstoss beim Schiessen"}, {"Multi-kill and streak announcer", "Ansager fuer Multikills und Serien"}, {"Red screen edge when hit", "Roter Bildschirmrand bei Treffern"}, {"PLAY ONLINE", "ONLINE SPIELEN"}, {"PROFILE & STATS", "PROFIL & STATS"}, {"SETTINGS", "EINSTELLUNGEN"}, {"Total XP", "XP gesamt"}, {"XP to next level", "XP bis zum naechsten Level"}, {"  Back to main menu  ", "  Zurueck zum Hauptmenue  "}, {"All other settings: ESC / F1 during the game.", "Alle weiteren Einstellungen: ESC / F1 im Spiel."}, {"TimeSplitters 2 Online+ - online play, progression and extra impact.", "TimeSplitters 2 Online+ - Online-Spiel, Fortschritt und mehr Wucht."}, {"Hit and kill sounds", "Treffer- und Kill-Sound"}, {"Progress", "Fortschritt"}, {"Kills", "Abschuesse"}, {"Hits", "Treffer"}, {"Hit +10 XP, kill +100 XP. Saved locally; online servers will track it later.", "Treffer +10 XP, Abschuss +100 XP. Lokal gespeichert; Online-Server zaehlen spaeter mit."}, {"Camera kick when hit", "Kamerastoss bei Treffern"}, {"Look up/down limit", "Blick hoch/runter bis"},
 			{"Click into the game to capture the mouse, ESC or F1 releases it.", "Klick ins Spiel faengt die Maus, ESC/F1 gibt sie wieder frei."},
 			{"Key bindings", "Tastenbelegung"}, {"Click a field, then press a key or mouse button. Delete clears, ESC cancels.", "Feld anklicken, dann Taste oder Maustaste druecken. Entf leert, ESC bricht ab."},
 			{"Action", "Aktion"}, {"Primary", "Taste 1"}, {"Secondary", "Taste 2"}, {"... press a key ...", "... Taste druecken ..."}, {"Reset to defaults", "Standardbelegung"},
@@ -1358,7 +1439,7 @@ namespace ps2xmenu
 			{"Zoom in (D-pad up)", "Heranzoomen (Steuerkreuz hoch)"}, {"Zoom out (D-pad down)", "Wegzoomen (Steuerkreuz runter)"},
 			{"Circle", "Kreis"}, {"Square", "Quadrat"}, {"Start (pause / game menu)", "Start (Pause / Spielmenue)"}, {"Select", "Select"},
 			{"Look up (right stick)", "Umsehen hoch (rechter Stick)"}, {"Look down", "Umsehen runter"}, {"Look left", "Umsehen links"}, {"Look right", "Umsehen rechts"},
-			// Tasten
+			// Keys
 			{"Mouse left", "Maus links"}, {"Mouse middle", "Maus Mitte"}, {"Mouse right", "Maus rechts"}, {"Wheel up", "Mausrad hoch"}, {"Wheel down", "Mausrad runter"},
 			{"Mouse side 1", "Maus Seite 1"}, {"Mouse side 2", "Maus Seite 2"}, {"Mouse button {}", "Maustaste {}"}, {"Space", "Leertaste"}, {"Backspace", "Rueck"},
 			{"Tab", "Tab"}, {"Enter", "Enter"}, {"Left", "Pfeil links"}, {"Up", "Pfeil hoch"}, {"Right", "Pfeil rechts"}, {"Down", "Pfeil runter"},
@@ -1370,13 +1451,13 @@ namespace ps2xmenu
 		const auto it = de.find(en);
 		return it == de.end() ? en : it->second;
 	}
-	// ---- Freie Belegung: Aktionen und ihre Tasten (Tastatur = KeySym, Maus = kMaus + Knopf) ----
+	// ---- Free bindings: actions and their keys (keyboard = KeySym, mouse = kMaus + button) ----
 	constexpr int kMaus = 0x10000000;  // + 1 links, 2 Mitte, 3 rechts, 4 Rad hoch, 5 Rad runter, 8/9 Seitentasten
 	enum Wirkung : int { W_TASTE = 0, W_STICK = 1, W_ZOOM = 2 };
 	struct Aktion { const char* name; int wirkung; unsigned wert; int std1, std2; };
-	// PS2-Bits wie libpad (1 = gedrueckt): SEL 0x1, L3 0x2, R3 0x4, START 0x8, HOCH 0x10, RECHTS 0x20, RUNTER 0x40,
+	// PS2 bits as in libpad (1 = pressed): SEL 0x1, L3 0x2, R3 0x4, START 0x8, UP 0x10, RIGHT 0x20, DOWN 0x40,
 	// LINKS 0x80, L2 0x100, R2 0x200, L1 0x400, R1 0x800, DREIECK 0x1000, KREIS 0x2000, KREUZ 0x4000, QUADRAT 0x8000.
-	// Stick-Bits: 0-3 linker Stick (hoch runter links rechts), 4-7 rechter Stick. Standard = TS2-PS2-Belegung fuer Maus+Tastatur.
+	// Stick bits: 0-3 left stick (up down left right), 4-7 right stick. Default = TS2 PS2 layout for mouse + keyboard.
 	static const Aktion kAktionen[] = {
 		{"Forward", W_STICK, 1, 'w', 0}, {"Backward", W_STICK, 2, 's', 0},
 		{"Strafe left", W_STICK, 4, 'a', 0}, {"Strafe right", W_STICK, 8, 'd', 0},
@@ -1394,7 +1475,7 @@ namespace ps2xmenu
 		{"Look up (right stick)", W_STICK, 16, 'i', 0}, {"Look down", W_STICK, 32, 'k', 0},
 		{"Look left", W_STICK, 64, 'j', 0}, {"Look right", W_STICK, 128, 'l', 0},
 	};
-	constexpr int kBelegungVersion = 2; // bei neuer Standardbelegung erhoehen: alte gespeicherte Belegung wird dann ersetzt
+	constexpr int kBelegungVersion = 2; // increase when the default bindings change: saved older bindings are then replaced
 	constexpr int kAnzAktionen = static_cast<int>(sizeof(kAktionen) / sizeof(kAktionen[0]));
 	inline std::string tastenName(int c)
 	{
@@ -1421,7 +1502,7 @@ namespace ps2xmenu
 		if (c >= 0xffbe && c <= 0xffc9) return fmt::format("F{}", c - 0xffbe + 1);
 		if (c >= 0xffb0 && c <= 0xffb9) return fmt::format(fmt::runtime(tr("Numpad {}")), c - 0xffb0);
 		if (c >= 0x21 && c < 0x7f) return std::string(1, static_cast<char>(c));
-		if (c >= 0xa1 && c < 0x100) // Latin-1 (Umlaute, ß usw.) als UTF-8
+		if (c >= 0xa1 && c < 0x100) // Latin-1 (umlauts, ß etc.) as UTF-8
 		{
 			std::string u; u += static_cast<char>(0xC0 | (c >> 6)); u += static_cast<char>(0x80 | (c & 0x3F)); return u;
 		}
@@ -1432,26 +1513,36 @@ namespace ps2xmenu
 	{
 		int upscale = 4, aspect = 0, cas = 1, casSharp = 25, tv = 0, filter = 2, aniso = 16, dither = 0;
 		int sbB = 50, sbC = 50, sbS = 50, rumblePct = 100, hz = 50, volume = 100, camBlur = 1, nachzieh = 0;
-		bool fxaa = false, shadeboost = false, fullscreen = false, showFps = false, rumble = true, vsync = false, startMenu = true;
-		int tri = 2;             // Trilineare Filterung: 0 automatisch (PCSX2-Standard), 1 wie PS2, 2 erzwungen (nutzt Mipmaps der Ersatztexturen)
-		int fx = 0;              // Effekte (vkBasalt): 0 aus, 1 original-plus, 2 klar, 3 filmisch - wirkt beim naechsten Start
-		bool hdText = true;      // Neusatz der Textseiten (TeX Gyre), hat Vorrang vor Paketen
-		bool showInput = false;  // Eingabe-Anzeige oben links (Debug), getrennt von der FPS-Anzeige
+		bool fxaa = false, shadeboost = false, fullscreen = false, showFps = false, rumble = true, vsync = false, startMenu = false;   // start menu: the launcher already did the setup
+		int tri = 2;             // Trilinear filtering: 0 automatic (PCSX2 default), 1 as PS2, 2 forced (uses the mipmaps of replacement textures)
+		int fx = 0;              // Effects (vkBasalt): 0 off, 1 original-plus, 2 clear, 3 cinematic - applies on the next start
+		bool hdText = true;      // Re-typeset text pages (TeX Gyre), takes precedence over packs
+		bool showInput = false;  // Input display top left (debug), separate from the FPS display
 		int lang = -1;           // Menuesprache: -1 automatisch, 0 English, 1 Deutsch
-		bool maus = !ps2xAufSteamDeck(); // Mauszielen: Klick ins Spielfenster faengt die Maus (ESC/F1 gibt sie frei); Steam Deck: aus
+		bool maus = !ps2xAufSteamDeck(); // Mouse aiming: a click into the game window captures the mouse (ESC/F1 releases it); Steam Deck: off
 		int mausSens = 30;       // Empfindlichkeit in Zehntel (1.0-10.0)
-		bool mausInvert = false; // Maus: oben/unten vertauscht
-		bool mausZielmodus = true; // Mauszielen: Zielmodus (Original-Fadenkreuz) automatisch halten
-		int zoomSens = 50;       // Empfindlichkeit beim Zoomen in % der normalen
-		int bel[32][2] = {};     // Belegung je Aktion (2 Tasten), Standard in kAktionen
-		int belVersion = 0;      // Version der gespeicherten Belegung (0 = keine gespeichert)
+		bool mausInvert = false; // Mouse: up/down inverted
+		bool mausZielmodus = false; // Mouse aiming: hold aim mode (L2) permanently - slows walking (~16 %), so off; zooming holds it by itself
+		int zoomSens = 50;       // sensitivity while zooming in % of the normal one
+		int scope = 1;          // sniper/zoom smear: 0 original, 1 clear, 2 extra clear
+		int impact = 1;         // Online+ impact effects (hit/kill markers, damage kick); only in the Online+ edition
+		int impactKick = 50;    // damage camera kick 0..100
+		int impactMarker = 1;   // hit markers on/off (with impact on)
+		int impactSound = 1;    // hit/kill sound on/off
+		int impactRecoil = 40;  // recoil punch on own shots 0..100 (springs back)
+		int impactAnsage = 1;   // multi-kill / streak announcer
+		int impactRand = 1;     // red screen edge when hit
+		int fadenkreuz = 0;      // own crosshair when playing with the mouse: 0 cross, 1 dot, 2 circle, 3 off
+		int nickMax = 40;        // Mouse: how far up/down you can look (degrees, original 40)
+		int bel[32][2] = {};     // bindings per action (2 keys), defaults in kAktionen
+		int belVersion = 0;      // version of the saved bindings (0 = none saved)
 		Cfg() { for (int i = 0; i < kAnzAktionen; ++i) { bel[i][0] = kAktionen[i].std1; bel[i][1] = kAktionen[i].std2; } belVersion = kBelegungVersion; }
 		std::string onlineServer, onlineName, onlinePw, onlineFavs; // Online (TS2): gewaehlter Server, Spielername, Passwort, Favoriten (Komma)
 		std::string packs = "*"; // aktive Texturpakete ("*" = alle vorhandenen, Voreinstellung) (Ordnernamen in texturquellen/, durch Komma, Reihenfolge = Prioritaet)
 	};
 	std::mutex m;
 	Cfg cfg;
-	std::atomic<double> applyAt{0.0}; // Zeitpunkt (ImGui-Zeit), ab dem geaenderte Einstellungen angewendet werden
+	std::atomic<double> applyAt{0.0}; // time (ImGui time) from which changed settings are applied
 
 	std::string dir()
 	{
@@ -1467,12 +1558,38 @@ namespace ps2xmenu
 		ps2x_mkdir(d.c_str(), 0755);
 		return d;
 	}
+	bool cfgEnglish();
 	std::string iniPath()
 	{
 		// PS2XGS_CFG=<Datei>: andere Einstellungsdatei (Vergleichsbilder in Testlaeufen)
 		if (const char* c = std::getenv("PS2XGS_CFG"); c && *c)
 			return c;
-		return dir() + "/einstellungen.ini";
+		return dir() + (cfgEnglish() ? "/settings.ini" : "/einstellungen.ini");
+	}
+	// PS2XGS_CFG_EN=1 (TS2 packages): settings file settings.ini with English keys. Both spellings are always read;
+	// if settings.ini is missing, the old einstellungen.ini is taken over once.
+	bool cfgEnglish() { const char* e = std::getenv("PS2XGS_CFG_EN"); return e && *e == '1'; }
+	static constexpr const char* kKeyMap[][2] = {
+		{"aufloesung", "resolution"}, {"bildformat", "aspect"}, {"cas_staerke", "cas_strength"}, {"farbe", "color_adjust"},
+		{"helligkeit", "brightness"}, {"kontrast", "contrast"}, {"saettigung", "saturation"}, {"texturfilter", "texture_filter"},
+		{"anisotrop", "anisotropic"}, {"vollbild", "fullscreen"}, {"fps_anzeige", "show_fps"}, {"vibration_staerke", "vibration_strength"},
+		{"startmenue", "start_menu"}, {"bildrate", "refresh_rate"}, {"lautstaerke", "volume"}, {"kamera_unschaerfe", "camera_blur"},
+		{"nachzieheffekt", "motion_trail"}, {"maus_zielen", "mouse_aim"}, {"maus_empfindlichkeit", "mouse_sensitivity"},
+		{"maus_invertiert", "mouse_invert"}, {"maus_zielmodus_dauer", "aim_mode_hold"}, {"sprache", "language"},
+		{"eingabeanzeige", "show_input"}, {"zoom_empfindlichkeit", "zoom_sensitivity"}, {"belegung_version", "bindings_version"},
+		{"effekte", "effects"}, {"fadenkreuz", "crosshair"}, {"zielfernrohr", "scope"}, {"online_plus_effekte", "impact_effects"}, {"schaden_stoss", "damage_kick"}, {"treffermarker", "hit_markers"}, {"treffer_klang", "hit_sound"}, {"blickwinkel_max", "pitch_limit"}, {"texturpakete", "texture_packs"}, {"online_passwort", "online_password"}, {"online_favoriten", "online_favorites"}};
+	static constexpr const char* kFxMap[][2] = {{"aus", "off"}, {"klar", "clear"}, {"filmisch", "cinematic"}};
+	// Line "key=value": translate the key (and the effects value) to the other language; nachEnglisch=false -> internal (German) names
+	std::string cfgZeile(const std::string& line, bool nachEnglisch)
+	{
+		const auto eq = line.find('=');
+		if (eq == std::string::npos || line.empty() || line[0] == '#') return line;
+		std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+		const int von = nachEnglisch ? 0 : 1, nach = nachEnglisch ? 1 : 0;
+		if (k.rfind(nachEnglisch ? "taste_" : "key_", 0) == 0) k = std::string(nachEnglisch ? "key_" : "taste_") + k.substr(nachEnglisch ? 6 : 4);
+		else for (const auto& m : kKeyMap) if (k == m[von]) { k = m[nach]; break; }
+		if (k == (nachEnglisch ? "effects" : "effekte")) for (const auto& m : kFxMap) if (v == m[von]) { v = m[nach]; break; }
+		return k + "=" + v;
 	}
 
 	void belegungPruefen();
@@ -1482,22 +1599,25 @@ namespace ps2xmenu
 		(void)envUpscale; // Standard: Remaster-Preset (4x); ein gespeicherter Wert hat Vorrang
 #ifdef __linux__
 		{
-			// Steam Deck (oder anderes Valve-Geraet): schwaechere GPU -> 2x intern (1280x800-Bildschirm), FXAA aus
+			// Steam Deck (or another Valve device): weaker GPU -> 2x internal (1280x800 screen), FXAA off
 			std::ifstream dv("/sys/devices/virtual/dmi/id/board_vendor");
 			std::string vend; std::getline(dv, vend);
 			const char* sd = std::getenv("SteamDeck");
 			if (vend.rfind("Valve", 0) == 0 || (sd && *sd == '1'))
 			{
 				cfg.upscale = 2; cfg.fxaa = false;
-				Console.WriteLn("[ps2xmenu] Steam Deck erkannt: Standard 2x intern, FXAA aus (Einstellungsdatei hat Vorrang)");
+				Console.WriteLn("[ps2xmenu] Steam Deck detected: default 2x internal, FXAA off (the settings file takes precedence)");
 			}
 		}
 #endif
-		cfg.belVersion = 0; // steht die Version nicht in der Datei, gilt eine dort gespeicherte Belegung als veraltet
+		cfg.belVersion = 0; // if the version is not in the file, bindings saved there count as outdated
 		std::ifstream f(iniPath());
+		if (!f && cfgEnglish() && !std::getenv("PS2XGS_CFG")) { f.clear(); f.open(dir() + "/einstellungen.ini"); }
 		std::string line;
 		while (std::getline(f, line))
 		{
+			if (!line.empty() && line.back() == '\r') line.pop_back();
+			line = cfgZeile(line, false);
 			const auto eq = line.find('=');
 			if (eq == std::string::npos || line[0] == '#')
 				continue;
@@ -1522,7 +1642,7 @@ namespace ps2xmenu
 			else if (k == "vibration_staerke") cfg.rumblePct = std::clamp(v, 0, 100);
 			else if (k == "vsync") cfg.vsync = v != 0;
 			else if (k == "startmenue") cfg.startMenu = v != 0;
-			else if (k == "bildrate") cfg.hz = (v == 60 && std::getenv("SOTC_60HZ_EXPERIMENT")) ? 60 : 50; // 60 Hz: Figur-Physik noch fehlerhaft
+			else if (k == "bildrate") cfg.hz = (v == 60 && std::getenv("SOTC_60HZ_EXPERIMENT")) ? 60 : 50; // 60 Hz: character physics still faulty
 			else if (k == "lautstaerke") cfg.volume = std::clamp(v, 0, 200);
 			else if (k == "kamera_unschaerfe") cfg.camBlur = v != 0 ? 1 : 0;
 			else if (k == "nachzieheffekt") cfg.nachzieh = v != 0 ? 1 : 0;
@@ -1530,10 +1650,20 @@ namespace ps2xmenu
 			else if (k == "maus_zielen") cfg.maus = v != 0;
 			else if (k == "maus_empfindlichkeit") cfg.mausSens = std::clamp(v, 1, 100);
 			else if (k == "maus_invertiert") cfg.mausInvert = v != 0;
-			else if (k == "maus_zielmodus") cfg.mausZielmodus = v != 0;
+			else if (k == "maus_zielmodus_dauer") cfg.mausZielmodus = v != 0; // the old key maus_zielmodus (default on) is ignored on purpose
 			else if (k == "sprache") cfg.lang = std::clamp(v, -1, 1);
 			else if (k == "eingabeanzeige") cfg.showInput = v != 0;
 			else if (k == "zoom_empfindlichkeit") cfg.zoomSens = std::clamp(v, 5, 200);
+			else if (k == "fadenkreuz") cfg.fadenkreuz = std::clamp(v, 0, 3);
+			else if (k == "zielfernrohr") cfg.scope = std::clamp(v, 0, 2);
+			else if (k == "online_plus_effekte") cfg.impact = v != 0 ? 1 : 0;
+			else if (k == "schaden_stoss") cfg.impactKick = std::clamp(v, 0, 100);
+			else if (k == "treffermarker") cfg.impactMarker = v != 0 ? 1 : 0;
+			else if (k == "treffer_klang") cfg.impactSound = v != 0 ? 1 : 0;
+			else if (k == "rueckstoss") cfg.impactRecoil = std::clamp(v, 0, 100);
+			else if (k == "ansager") cfg.impactAnsage = v != 0 ? 1 : 0;
+			else if (k == "schaden_rand") cfg.impactRand = v != 0 ? 1 : 0;
+			else if (k == "blickwinkel_max") cfg.nickMax = std::clamp(v, 40, 85);
 			else if (k == "belegung_version") cfg.belVersion = v;
 			else if (k.rfind("taste_", 0) == 0)
 			{
@@ -1558,7 +1688,7 @@ namespace ps2xmenu
 	}
 	void belegungPruefen()
 	{
-		// Ohne Sperre aufrufen (load haelt sie): aeltere/fehlende Belegung durch die aktuelle Standardbelegung ersetzen
+		// Call without the lock (load holds it): replace older/missing bindings with the current defaults
 		if (cfg.belVersion < kBelegungVersion)
 		{
 			for (int i = 0; i < kAnzAktionen; ++i) { cfg.bel[i][0] = kAktionen[i].std1; cfg.bel[i][1] = kAktionen[i].std2; }
@@ -1569,21 +1699,28 @@ namespace ps2xmenu
 	{
 		Cfg c;
 		{ std::lock_guard<std::mutex> lk(m); c = cfg; }
-		std::ofstream f(iniPath(), std::ios::trunc);
+		std::ostringstream f;
 		f << "# " << cfgName() << " - Einstellungen (werden im Spielmenue geaendert, ESC/F1 oder Guide-Taste)\n"
 		  << "aufloesung=" << c.upscale << "\nbildformat=" << c.aspect << "\nfxaa=" << c.fxaa << "\ncas=" << c.cas
 		  << "\ncas_staerke=" << c.casSharp << "\ndithering=" << c.dither << "\ntv_shader=" << c.tv << "\nfarbe=" << c.shadeboost << "\nhelligkeit=" << c.sbB
 		  << "\nkontrast=" << c.sbC << "\nsaettigung=" << c.sbS << "\ntexturfilter=" << c.filter << "\nanisotrop=" << c.aniso
 		  << "\nvollbild=" << c.fullscreen << "\nfps_anzeige=" << c.showFps << "\nvibration=" << c.rumble
-		  << "\nvibration_staerke=" << c.rumblePct << "\nvsync=" << c.vsync << "\nbildrate=" << c.hz << "\nlautstaerke=" << c.volume << "\nkamera_unschaerfe=" << c.camBlur << "\nnachzieheffekt=" << c.nachzieh << "\nstartmenue=" << c.startMenu << "\neffekte=" << (c.fx == 1 ? "original-plus" : c.fx == 2 ? "klar" : c.fx == 3 ? "filmisch" : "aus") << "\ntrilinear=" << c.tri << "\nhd_text=" << c.hdText << "\nmaus_zielen=" << c.maus << "\nmaus_empfindlichkeit=" << c.mausSens << "\nmaus_invertiert=" << c.mausInvert << "\nmaus_zielmodus=" << c.mausZielmodus << "\nsprache=" << c.lang << "\neingabeanzeige=" << c.showInput << "\nbelegung_version=" << c.belVersion << "\nzoom_empfindlichkeit=" << c.zoomSens << "\ntexturpakete=" << c.packs << "\nonline_server=" << c.onlineServer << "\nonline_name=" << c.onlineName << "\nonline_passwort=" << c.onlinePw << "\nonline_favoriten=" << c.onlineFavs << "\n";
+		  << "\nvibration_staerke=" << c.rumblePct << "\nvsync=" << c.vsync << "\nbildrate=" << c.hz << "\nlautstaerke=" << c.volume << "\nkamera_unschaerfe=" << c.camBlur << "\nnachzieheffekt=" << c.nachzieh << "\nstartmenue=" << c.startMenu << "\neffekte=" << (c.fx == 1 ? "original-plus" : c.fx == 2 ? "klar" : c.fx == 3 ? "filmisch" : "aus") << "\ntrilinear=" << c.tri << "\nhd_text=" << c.hdText << "\nmaus_zielen=" << c.maus << "\nmaus_empfindlichkeit=" << c.mausSens << "\nmaus_invertiert=" << c.mausInvert << "\nmaus_zielmodus_dauer=" << c.mausZielmodus << "\nsprache=" << c.lang << "\neingabeanzeige=" << c.showInput << "\nbelegung_version=" << c.belVersion << "\nzoom_empfindlichkeit=" << c.zoomSens << "\nfadenkreuz=" << c.fadenkreuz << "\nzielfernrohr=" << c.scope << "\nonline_plus_effekte=" << c.impact << "\nschaden_stoss=" << c.impactKick << "\ntreffermarker=" << c.impactMarker << "\ntreffer_klang=" << c.impactSound << "\nrueckstoss=" << c.impactRecoil << "\nansager=" << c.impactAnsage << "\nschaden_rand=" << c.impactRand << "\nblickwinkel_max=" << c.nickMax << "\ntexturpakete=" << c.packs << "\nonline_server=" << c.onlineServer << "\nonline_name=" << c.onlineName << "\nonline_passwort=" << c.onlinePw << "\nonline_favoriten=" << c.onlineFavs << "\n";
 		for (int i = 0; i < kAnzAktionen; ++i)
 			f << "taste_" << i << "=" << c.bel[i][0] << "," << c.bel[i][1] << "   # " << kAktionen[i].name << "\n";
+		std::ofstream aus(iniPath(), std::ios::trunc);
+		if (!cfgEnglish()) { aus << f.str(); return; }
+		aus << "# " << cfgName() << " - settings (changed in the game menu: ESC/F1 or the Guide button)\n";
+		std::istringstream in(f.str());
+		std::string z;
+		std::getline(in, z); // deutsche Kopfzeile
+		while (std::getline(in, z)) aus << cfgZeile(z, true) << "\n";
 	}
 	// ---------- Texturquellen (HD-Text + Pakete) -> zusammengesetzter Ersatzordner ----------
-	// Quellen: <dir>/texturquellen/<name>/... (hd-text = unser Neusatz; Pakete werden von "SotC starten" aus
+	// Sources: <dir>/texturquellen/<name>/... (hd-text = our re-typeset pages; packs are imported by the start script from
 	// texturpakete/*.zip|7z|rar importiert). Ziel: <Textures>/SCES-53326/replacements als Verweise (Symlinks); spaetere
-	// Quelle ueberschreibt fruehere, HD-Text zuletzt. PS2XGS_TEXDIR (Testlaeufe) schaltet die Verwaltung ab.
-	// PS2XGS_TEXQUELLEN: Ordner mit den Texturquellen (Startskript: <Projekt>/build/texturquellen), sonst ~/.config/...
+	// source overrides earlier ones, HD text last. PS2XGS_TEXDIR (test runs) turns the management off.
+	// PS2XGS_TEXQUELLEN: directory with the texture sources (start script: <project>/build/texturquellen), otherwise ~/.config/...
 	std::string quellenDir()
 	{
 		if (const char* q = std::getenv("PS2XGS_TEXQUELLEN"); q && *q) return q;
@@ -1627,12 +1764,12 @@ namespace ps2xmenu
 		       a.aniso == b.aniso && a.dither == b.dither && a.sbB == b.sbB && a.sbC == b.sbC && a.sbS == b.sbS && a.rumblePct == b.rumblePct &&
 		       a.hz == b.hz && a.volume == b.volume && a.camBlur == b.camBlur && a.nachzieh == b.nachzieh && a.fxaa == b.fxaa && a.shadeboost == b.shadeboost &&
 		       a.fullscreen == b.fullscreen && a.showFps == b.showFps && a.rumble == b.rumble && a.vsync == b.vsync && a.startMenu == b.startMenu &&
-		       a.hdText == b.hdText && a.maus == b.maus && a.mausSens == b.mausSens && a.mausInvert == b.mausInvert && a.mausZielmodus == b.mausZielmodus && a.lang == b.lang && a.showInput == b.showInput &&
+		       a.hdText == b.hdText && a.maus == b.maus && a.mausSens == b.mausSens && a.mausInvert == b.mausInvert && a.mausZielmodus == b.mausZielmodus && a.fadenkreuz == b.fadenkreuz && a.scope == b.scope && a.impact == b.impact && a.impactKick == b.impactKick && a.impactMarker == b.impactMarker && a.impactSound == b.impactSound && a.impactRecoil == b.impactRecoil && a.impactAnsage == b.impactAnsage && a.impactRand == b.impactRand && a.nickMax == b.nickMax && a.lang == b.lang && a.showInput == b.showInput &&
 		       a.zoomSens == b.zoomSens && std::memcmp(a.bel, b.bel, sizeof(a.bel)) == 0 && a.packs == b.packs && a.fx == b.fx && a.tri == b.tri &&
 		       a.onlineServer == b.onlineServer && a.onlineName == b.onlineName && a.onlinePw == b.onlinePw && a.onlineFavs == b.onlineFavs;
 	}
-	// Schluessel wie PCSX2 ihn beim Laden bildet: "<TEX0-Hash>-<CLUT-Hash>-<Bits>" ohne das alte TCC-Bit (0x4000),
-	// das aeltere Pakete noch im Namen tragen (RemoveUnusedBits). Gleiche Schluessel = dieselbe Textur.
+	// Key as PCSX2 builds it when loading: "<TEX0 hash>-<CLUT hash>-<bits>" without the old TCC bit (0x4000)
+	// that older packs still carry in the name (RemoveUnusedBits). Same key = same texture.
 	static std::string texKey(const std::string& file)
 	{
 		const auto dot = file.find('.');
@@ -1643,13 +1780,13 @@ namespace ps2xmenu
 		char b[16]; std::snprintf(b, sizeof(b), "%08lx", bits);
 		return base.substr(0, d + 1) + b;
 	}
-	// keys: bereits belegte Texturen (Pakete zuerst); eine Quelle mit nurNeue=true fuellt nur Luecken.
+	// keys: textures already covered (packs first); a source with nurNeue=true only fills gaps.
 	static void linkTree(const std::filesystem::path& src, const std::filesystem::path& dst, unsigned& n,
 		std::set<std::string>& keys, bool nurNeue = false)
 	{
 		std::error_code ec;
-		// <quelle>/.ausschluss.txt: Dateinamen, die nicht ersetzt werden (z. B. Palettentexturen, deren Ersatz PCSX2 in
-		// den langsamen Pfad zwingt: jede Palettenvariante einzeln umgewandelt -> Draw-Calls x3..x8)
+		// <source>/.ausschluss.txt: file names that are not replaced (e.g. palette textures whose replacement forces PCSX2
+		// onto the slow path: every palette variant converted separately -> draw calls x3..x8)
 		std::set<std::string> aus;
 		{
 			std::ifstream f((src / ".ausschluss.txt").string());
@@ -1668,7 +1805,7 @@ namespace ps2xmenu
 			if (nurNeue && keys.count(key)) continue;
 			keys.insert(key);
 			const auto to = dst / e.path().filename();
-			// Alpha-Zusatzdatei (tools/dds_alpha.py) wird ueber den echten Pfad gelesen, kein eigener Verweis noetig
+			// The alpha side file (tools/dds_alpha.py) is read through the real path, no link of its own needed
 			std::filesystem::remove(to, ec);
 			std::filesystem::create_symlink(std::filesystem::absolute(e.path()), to, ec);
 			if (ec) { ec.clear(); std::filesystem::create_hard_link(e.path(), to, ec); }
@@ -1676,7 +1813,7 @@ namespace ps2xmenu
 			if (!ec) ++n;
 		}
 	}
-	// Zusammensetzen; Rueckgabe = Anzahl Dateien. Darf vor dem GS-Start und auf dem GS-Thread laufen.
+	// Assemble; returns the number of files. May run before the GS starts and on the GS thread.
 	unsigned assembleTextures()
 	{
 		if (!texManaged()) return 0;
@@ -1687,7 +1824,7 @@ namespace ps2xmenu
 		std::filesystem::create_directories(dst, ec);
 		if (!std::filesystem::exists(marker, ec))
 		{
-			// Altbestand (von Hand oder von frueheren Startskripten kopiert) einmalig als Quelle "alt" sichern
+			// Save existing files (copied by hand or by earlier start scripts) once as the source "alt"
 			const auto alt = std::filesystem::path(quellenDir()) / "alt" / "replacements";
 			bool any = false;
 			for (const auto& e : std::filesystem::directory_iterator(dst, ec))
@@ -1699,29 +1836,29 @@ namespace ps2xmenu
 		unsigned n = 0;
 		const auto q = std::filesystem::path(quellenDir());
 		std::string pk; bool hd; { std::lock_guard<std::mutex> lk(m); pk = cfg.packs; hd = cfg.hdText; }
-		// Pakete zuerst: bringen sie eine Textseite selbst mit (z. B. Origami: alle Sprachen, Originalschrift),
-		// gewinnt das Paket; unser Neusatz fuellt nur Seiten, die kein aktives Paket abdeckt.
+		// Packs first: if they bring a text page themselves (e.g. Origami: all languages, original font),
+		// the pack wins; our re-typeset pages only fill pages no active pack covers.
 		std::set<std::string> keys;
 		for (const auto& name : activePacks(pk)) linkTree(q / name, dst, n, keys);
 		if (hd) linkTree(q / "hd-text", dst, n, keys, true);
 		return n;
 	}
-	// in die PCSX2-Einstellungen uebertragen (CPU-Thread bzw. vor dem Start)
+	// transfer into the PCSX2 settings (CPU thread or before the start)
 	void toSettings(SettingsInterface& si)
 	{
 		Cfg c;
 		{ std::lock_guard<std::mutex> lk(m); c = cfg; }
-		// Bildformat: 0 = 16:9 (Breitbild-Modus des Spiels erzwungen), 1 = wie Spieloption, 2 = 4:3, 3 = Fenster fuellen
+		// Aspect: 0 = 16:9 (the game's widescreen mode forced), 1 = as the game option, 2 = 4:3, 3 = fill the window
 		const bool wide = (c.aspect == 0) || (c.aspect == 1 && gameWide.load());
 		si.SetFloatValue("EmuCore/GS", "upscale_multiplier", static_cast<float>(c.upscale));
 		si.SetStringValue("EmuCore/GS", "VideoCaptureCodec", envOr("PS2XGS_CAPTURE_CODEC", "libx264"));
 		si.SetIntValue("EmuCore/GS", "VideoCaptureBitrate", std::atoi(envOr("PS2XGS_CAPTURE_KBPS", "40000")));
-		// x264: konstante Qualitaet statt Bitrate, schneller Preset (Echtzeit bei 4K/60 auf vielen Kernen); PS2XGS_CAPTURE_PARAMS ueberschreibt
+		// x264: constant quality instead of bitrate, fast preset (real time at 4K/60 on many cores); PS2XGS_CAPTURE_PARAMS overrides
 		si.SetBoolValue("EmuCore/GS", "EnableVideoCaptureParameters", true);
 		si.SetStringValue("EmuCore/GS", "VideoCaptureParameters", envOr("PS2XGS_CAPTURE_PARAMS", "crf=16:preset=veryfast"));
 		si.SetStringValue("EmuCore/GS", "CaptureContainer", "mp4");
 		si.SetBoolValue("EmuCore/GS", "EnableVideoCapture", true);
-		// Ton mit aufnehmen (PS2XGS_CAPTURE_AUDIO=0 fuer Testlaeufe ohne Tonausgabe: sonst wartet das Video auf Tonpakete)
+		// Record sound too (PS2XGS_CAPTURE_AUDIO=0 for test runs without audio output: otherwise the video waits for audio packets)
 		si.SetBoolValue("EmuCore/GS", "EnableAudioCapture", std::atoi(envOr("PS2XGS_CAPTURE_AUDIO", "1")) != 0);
 		si.SetIntValue("EmuCore/GS", "AudioCaptureBitrate", 192);
 		si.SetStringValue("EmuCore/GS", "AudioCaptureCodec", "aac");
@@ -1729,7 +1866,7 @@ namespace ps2xmenu
 		si.SetBoolValue("EmuCore/GS", "fxaa", c.fxaa);
 		si.SetIntValue("EmuCore/GS", "CASMode", c.cas);
 		si.SetIntValue("EmuCore/GS", "CASSharpness", c.casSharp);
-		// PS2-Dithering: hochskaliert wird es zum feinen Gittermuster auf Gesichtern/Waenden -> im Remaster aus
+		// PS2 dithering: upscaled it becomes a fine grid pattern on faces/walls -> off in the remaster preset
 		si.SetIntValue("EmuCore/GS", "dithering_ps2", c.dither);
 		// Oberste/unterste Bildzeile enthaelt Restdaten (bunte Pixel am Bildrand) -> je 2 Zeilen abschneiden
 		si.SetIntValue("EmuCore/GS", "CropTop", 2);
@@ -1742,10 +1879,13 @@ namespace ps2xmenu
 		si.SetIntValue("EmuCore/GS", "filter", c.filter);
 		si.SetIntValue("EmuCore/GS", "MaxAnisotropy", c.aniso);
 		si.SetIntValue("EmuCore/GS", "TriFilter", c.tri == 0 ? -1 : c.tri == 1 ? 1 : 2); // TriFiltering: Automatic/PS2/Forced
-		si.SetBoolValue("EmuCore/GS", "OsdShowFPS", c.showFps);
-		si.SetIntValue("EmuCore/GS", "OsdPerformancePos", c.showFps ? 3 : 0);
+		static const bool showcase = std::getenv("PS2XGS_SHOWCASE") != nullptr;   // recordings: no FPS counter in the picture
+		si.SetBoolValue("EmuCore/GS", "OsdShowFPS", c.showFps && !showcase);
+		si.SetIntValue("EmuCore/GS", "OsdPerformancePos", (c.showFps && !showcase) ? 3 : 0);
+		si.SetBoolValue("EmuCore/GS", "OsdShowResolution", c.showFps && !showcase);   // resolution line only together with the FPS counter
+		si.SetBoolValue("EmuCore/GS", "OsdShowGSStats", false);
 		si.SetIntValue("EmuCore/GS", "VsyncEnable", c.vsync ? 1 : 0);
-		si.SetBoolValue("EmuCore/GS", "hw_mipmap", true);           // Mipmaps in Hardware: kein Flimmern in der Ferne
+		si.SetBoolValue("EmuCore/GS", "hw_mipmap", true);           // Mipmaps in hardware: no shimmering in the distance
 		si.SetIntValue("EmuCore/GS", "linear_present_mode", 1);     // weiches Herunterrechnen = Supersampling-Effekt
 	}
 
@@ -1779,7 +1919,7 @@ namespace ps2xmenu
 
 	void style()
 	{
-		// TimeSplitters 2: tiefes Blau-Schwarz, cyanfarbene Linien, gruene Hervorhebung, weisse Schrift - wie die Spielmenues
+		// TimeSplitters 2: deep blue-black, cyan lines, green highlight, white text - like the game's menus
 		ImGuiStyle& st = ImGui::GetStyle();
 		st.WindowRounding = 4.0f; st.FrameRounding = 3.0f; st.GrabRounding = 3.0f; st.TabRounding = 3.0f; st.PopupRounding = 4.0f; st.ScrollbarRounding = 3.0f;
 		st.WindowBorderSize = 1.0f; st.FrameBorderSize = 0.0f; st.TabBorderSize = 0.0f;
@@ -1838,11 +1978,23 @@ namespace ps2xmenu
 	}
 
 static bool s_onlineTabWaehlen = false;
-	// ---------- Online: Serverbrowser (TS2-Online-Mehrspieler, siehe server/ im Port-Repo) ----------
-	// Liste: Community-Serverliste (GitHub, PS2XGS_SERVERLISTE) + eigene Favoriten. Jeder Server beantwortet eine kurze
-	// UDP-Abfrage "T2IN"+Nonce mit Name, Spielern, Passwort-Kennung und Nachricht; daraus auch der Ping.
-	// Die Spiel-Seite (Laufzeit) liest online_server/online_name/online_passwort aus der Einstellungsdatei beim
-	// Netzwerkstart (Arcade -> Network). PS2XGS_ONLINE=1 (Startskript von TS2) schaltet den Reiter ein.
+static bool s_opTabWaehlen = false;   // open the menu on the Online+ page
+static bool s_hubModus = false;       // menu shows the Online+ hub (opened from the game's main menu item)
+// Level order of the Arcade Custom list (index = how often the macro presses down)
+static const char* kBotKarten[] = {"Mexican Mission", "Ice Station", "Hospital", "Training Ground", "Aztec", "Scrapyard *", "Nightclub *", "Hangar *",
+	"Robot Factory *", "Ufopia *", "Chinese *", "Chasm *", "Streets *", "Compound *", "Site *", "Circus *"};
+static const int kBotKartenN = 16;
+// Capture the Bag has its own (shorter) level list in the game
+static const char* kBotKartenCtb[] = {"Mexican Mission", "Ice Station", "Training Ground", "Hangar *", "Streets *"};
+static const int kBotKartenCtbN = 5;
+// the game's bot presets (Setup Bots -> Current Bot Set), in their order
+static const char* kBotSets[] = {"Recommended", "Misfits", "Freaks", "The Living Dead", "Lovely Ladies", "Military", "Classic", "Leads", "Sidekicks"};
+static const int kBotSetsN = 9;
+	// ---------- Online: server browser (TS2 online multiplayer, see server/ in the port repository) ----------
+	// List: community server list (GitHub, PS2XGS_SERVERLISTE) + own favourites. Every server answers a short
+	// UDP query "T2IN"+nonce with name, players, password flag and message; the ping comes from that too.
+	// The game side (runtime) reads online_server/online_name/online_passwort from the settings file when the
+	// network starts (Arcade -> Network). PS2XGS_ONLINE=1 (TS2 start script) turns the tab on.
 	namespace online
 	{
 		struct Eintrag
@@ -1855,8 +2007,8 @@ static bool s_onlineTabWaehlen = false;
 		std::vector<Eintrag> liste;
 		std::atomic<bool> laeuft{false};
 		std::string meldung = "Noch nicht aktualisiert";
-		std::string spielStatus;            // von der Laufzeit (ps2xgs_online_status)
-		std::atomic<bool> oeffnen{false};   // Laufzeit: Netzwerk-Konfiguration im Spiel erreicht -> Browser zeigen
+		std::string spielStatus;            // from the runtime (ps2xgs_online_status)
+		std::atomic<bool> oeffnen{false};   // Runtime: the game reached the network configuration -> show the browser
 		bool vonSpielGeoeffnet = false;
 		int auswahl = -1;
 		char eingabe[128] = "";
@@ -1866,7 +2018,7 @@ static bool s_onlineTabWaehlen = false;
 		bool nurFrei = false, nurOffen = false, nurFav = false;
 
 		bool aktiv() { const char* e = std::getenv("PS2XGS_ONLINE"); return e && *e == '1'; }
-		const char* listenUrl() { return envOr("PS2XGS_SERVERLISTE", "https://raw.githubusercontent.com/Destinity13/TimeSplitters-2-Native-Linux-Recomp/main/server/servers.txt"); }
+		const char* listenUrl() { return envOr("PS2XGS_SERVERLISTE", "https://raw.githubusercontent.com/Destinity13/TimeSplitters-2-Native-Recomp-Windows-Linux-SteamDeck/main/server/servers.txt"); }
 
 		std::vector<std::string> teilen(const std::string& s, char t)
 		{
@@ -2011,7 +2163,7 @@ static bool s_onlineTabWaehlen = false;
 		}
 	}
 
-	// Reiter "Online" im Spielmenue: Spielername, Serverliste (sortier-/filterbar), Verbinden, Favoriten, direkte Adresse
+	// Tab "Online" in the game menu: player name, server list (sortable/filterable), connect, favourites, direct address
 	bool onlineTab(Cfg& c, bool& schliessen)
 	{
 		using namespace online;
@@ -2167,6 +2319,12 @@ static bool s_onlineTabWaehlen = false;
 	void draw()
 	{
 		static bool styled = false;
+		if (opOeffnen.exchange(false) && active.load())
+		{
+			s_hubModus = true;
+			open.store(true);
+		}
+		if (!open.load()) s_hubModus = false;
 		if (online::oeffnen.exchange(false) && online::aktiv() && active.load())
 		{
 			online::vonSpielGeoeffnet = true;
@@ -2184,11 +2342,11 @@ static bool s_onlineTabWaehlen = false;
 		if (!open.load())
 		{
 			s_prevNav = 0;
-			// Die ersten Sekunden: dezenter Hinweis, wie das Menue aufgeht
+			// The first seconds: a subtle hint how to open the menu
 			static const auto s_t0 = std::chrono::steady_clock::now();
 			const float t = std::chrono::duration<float>(std::chrono::steady_clock::now() - s_t0).count();
 			{
-				// Eingabe-Anzeige (Debug-Option, Standard aus): was das Spiel gerade vom Pad/der Tastatur bekommt
+				// Input display (debug option, default off): what the game currently gets from the pad/keyboard
 				bool show; { std::lock_guard<std::mutex> lk(m); show = cfg.showInput; }
 				if (show)
 				{
@@ -2202,6 +2360,209 @@ static bool s_onlineTabWaehlen = false;
 					const ImVec2 ts = ImGui::CalcTextSize(txt.c_str());
 					dl->AddRectFilled(ImVec2(p0.x - fs * 0.4f, p0.y - fs * 0.3f), ImVec2(p0.x + ts.x + fs * 0.4f, p0.y + ts.y + fs * 0.3f), IM_COL32(0, 0, 0, 150), fs * 0.2f);
 					dl->AddText(p0, IM_COL32(120, 255, 140, 255), txt.c_str());
+				}
+			}
+			{
+				// Own crosshair at the screen centre while playing with the mouse (the game's aim HUD is hidden, aim mode is held for exact shots)
+				int art; { std::lock_guard<std::mutex> lk(m); art = cfg.fadenkreuz; }
+				if (ps2xosd::ego.load() && !ps2xosd::zoomAktiv.load() && !open.load() && art != 3)
+				{
+					ImDrawList* dl = ImGui::GetForegroundDrawList();
+					ps2xImSpiel spiel(dl); const ImVec2 ds = spiel.ds;
+					const float cx = std::floor(ds.x * 0.5f), cy = std::floor(ds.y * 0.5f);
+					const float u = std::max(1.0f, std::round(ds.y / 540.0f)); // Strichstaerke
+					const float in = 4.0f * u, out = 11.0f * u;
+					const ImU32 sch = IM_COL32(0, 0, 0, 170), hell = IM_COL32(255, 255, 255, 235);
+					const ImVec2 a[4][2] = {{{cx - out, cy}, {cx - in, cy}}, {{cx + in, cy}, {cx + out, cy}}, {{cx, cy - out}, {cx, cy - in}}, {{cx, cy + in}, {cx, cy + out}}};
+					if (art == 0)
+					{
+						for (const auto& l : a) dl->AddLine(l[0], l[1], sch, u * 3.0f);
+						for (const auto& l : a) dl->AddLine(l[0], l[1], hell, u);
+					}
+					else if (art == 2)
+					{
+						dl->AddCircle(ImVec2(cx, cy), out, sch, 48, u * 3.0f);
+						dl->AddCircle(ImVec2(cx, cy), out, hell, 48, u);
+					}
+					dl->AddCircleFilled(ImVec2(cx, cy), u * (art == 1 ? 2.6f : 1.6f), sch); dl->AddCircleFilled(ImVec2(cx, cy), u * (art == 1 ? 1.7f : 0.9f), hell);
+				}
+			}
+			{
+				// Online+ hit marker (white X, 0.22 s) and kill marker (red X, larger, 0.45 s) around the screen centre
+				bool imp, mk; { std::lock_guard<std::mutex> lk(m); imp = cfg.impact != 0; mk = cfg.impactMarker != 0; }
+				static const bool impEnv = [] { const char* e = std::getenv("TS2_IMPACT"); return e && *e == '1'; }();
+				if (impEnv) { imp = true; mk = true; }
+				if (!onlinePlus()) imp = false;
+				if (imp && mk && !open.load())
+				{
+					const long long jetzt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+					const float aT = static_cast<float>(jetzt - ps2xosd::trefferMs.load()) / 1000.0f, aK = static_cast<float>(jetzt - ps2xosd::killMs.load()) / 1000.0f;
+					const bool kill = aK >= 0.0f && aK < 0.45f, treffer = aT >= 0.0f && aT < 0.22f;
+					if (kill || treffer)
+					{
+						ImDrawList* dl = ImGui::GetForegroundDrawList();
+						ps2xImSpiel spiel(dl); const ImVec2 ds = spiel.ds;
+						const float cx = std::floor(ds.x * 0.5f), cy = std::floor(ds.y * 0.5f);
+						const float u = std::max(1.0f, std::round(ds.y / 540.0f));
+						const float t01 = kill ? aK / 0.45f : aT / 0.22f;
+						const float in = (kill ? 9.0f : 7.0f) * u + t01 * 3.0f * u, out = in + (kill ? 10.0f : 7.0f) * u;
+						const int al = static_cast<int>(255 * (1.0f - t01 * t01));
+						const ImU32 sch = IM_COL32(0, 0, 0, al * 2 / 3), col = kill ? IM_COL32(255, 60, 50, al) : IM_COL32(255, 255, 255, al);
+						const float d = 0.7071f;
+						for (int q = 0; q < 4; ++q)
+						{
+							const float sx = (q & 1) ? 1.0f : -1.0f, sy = (q & 2) ? 1.0f : -1.0f;
+							const ImVec2 a(cx + sx * in * d, cy + sy * in * d), b(cx + sx * out * d, cy + sy * out * d);
+							dl->AddLine(a, b, sch, u * (kill ? 4.0f : 3.0f));
+							dl->AddLine(a, b, col, u * (kill ? 2.2f : 1.5f));
+						}
+						if (kill)
+						{
+							const char* txt = "+100 XP";
+							ImFont* xf = ps2xschrift::fett(); if (!xf) xf = ImGui::GetFont();
+							const float xs = ImGui::GetFontSize() * 1.35f;
+							const ImVec2 ts = xf->CalcTextSizeA(xs, FLT_MAX, 0.0f, txt);
+							const ImVec2 p0(cx - ts.x * 0.5f, cy + out + 6.0f * u - t01 * 8.0f * u);
+							dl->AddText(xf, xs, ImVec2(p0.x + u * 1.5f, p0.y + u * 1.5f), IM_COL32(0, 0, 0, al), txt);
+							dl->AddText(xf, xs, p0, IM_COL32(255, 210, 90, al), txt);
+						}
+					}
+				}
+			}
+			{
+				// Online+ arcade layer: red edge flash when hit, big announcer text for multi-kills and streaks
+				bool imp, rd, an; { std::lock_guard<std::mutex> lk(m); imp = cfg.impact != 0; rd = cfg.impactRand != 0; an = cfg.impactAnsage != 0; }
+				static const bool impEnv2 = [] { const char* e = std::getenv("TS2_IMPACT"); return e && *e == '1'; }();
+				if (impEnv2) { imp = true; rd = true; an = true; }
+				if (!onlinePlus()) imp = false;
+				if (imp && !open.load())
+				{
+					const long long jetzt = ps2xosd::jetztMs();
+					ImDrawList* dl = ImGui::GetForegroundDrawList();
+					ps2xImSpiel spiel(dl); const ImVec2 ds = spiel.ds;
+					const float aS = static_cast<float>(jetzt - ps2xosd::schadenMs.load()) / 1000.0f;
+					if (rd && aS >= 0.0f && aS < 0.6f)
+					{
+						const float k = (1.0f - aS / 0.6f); const float st = 0.35f + 0.65f * ps2xosd::schadenStaerke.load() / 100.0f;
+						const int al = static_cast<int>(200 * k * k * st);
+						const ImU32 v = IM_COL32(200, 10, 0, al), z = IM_COL32(200, 10, 0, 0);
+						const float bx = ds.x * 0.16f, by = ds.y * 0.18f;
+						dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(bx, ds.y), v, z, z, v);
+						dl->AddRectFilledMultiColor(ImVec2(ds.x - bx, 0), ImVec2(ds.x, ds.y), z, v, v, z);
+						dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(ds.x, by), v, v, z, z);
+						dl->AddRectFilledMultiColor(ImVec2(0, ds.y - by), ImVec2(ds.x, ds.y), z, z, v, v);
+					}
+					std::string txt; long long ams; int stufe;
+					{ std::lock_guard<std::mutex> lk(ps2xosd::am); txt = ps2xosd::ansText; ams = ps2xosd::ansMs; stufe = ps2xosd::ansStufe; }
+					const float aA = static_cast<float>(jetzt - ams) / 1000.0f;
+					if (false && an && !txt.empty() && aA >= 0.0f && aA < 1.8f)   // now shown in-game by the game's own message system
+					{
+						// pop in (overshoot), hold, fade out
+						const float pop = aA < 0.12f ? 0.6f + 0.6f * (aA / 0.12f) : aA < 0.25f ? 1.2f - 0.2f * ((aA - 0.12f) / 0.13f) : 1.0f;
+						const float al = aA > 1.3f ? 1.0f - (aA - 1.3f) / 0.5f : 1.0f;
+						const float fs = ImGui::GetFontSize() * (2.4f + 0.25f * std::min(stufe, 4)) * pop;
+						ImFont* f = ps2xschrift::kopf(); if (!f) f = ImGui::GetFont();
+						const ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0.0f, txt.c_str());
+						const ImVec2 p0(std::floor(ds.x * 0.5f - ts.x * 0.5f), std::floor(ds.y * 0.27f - ts.y * 0.5f));
+						const ImU32 farbe = stufe >= 4 ? IM_COL32(255, 70, 40, static_cast<int>(255 * al)) : stufe >= 2 ? IM_COL32(255, 150, 30, static_cast<int>(255 * al)) : IM_COL32(255, 220, 80, static_cast<int>(255 * al));
+						const float o = std::max(2.0f, fs * 0.06f);
+						for (int q = 0; q < 4; ++q) dl->AddText(f, fs, ImVec2(p0.x + ((q & 1) ? o : -o), p0.y + ((q & 2) ? o : -o)), IM_COL32(0, 0, 0, static_cast<int>(200 * al)), txt.c_str());
+						dl->AddText(f, fs, p0, farbe, txt.c_str());
+					}
+				}
+			}
+			if (onlinePlus() && !open.load())
+			{
+				// ---- Online+ killfeed (top right, under the game's radar) and scoreboard (hold Select / Tab) ----
+				ImDrawList* dl = ImGui::GetForegroundDrawList();
+				ps2xImSpiel spiel(dl); const ImVec2 ds = spiel.ds;
+				const long long jetzt = ps2xosd::jetztMs();
+				std::vector<ps2xfeed::Zeile> zl; std::string tafel;
+				{ std::lock_guard<std::mutex> lk(ps2xfeed::m); zl = ps2xfeed::zeilen; tafel = ps2xfeed::tafel; }
+				ImFont* tf = ps2xschrift::fett(); if (!tf) tf = ImGui::GetFont();
+				const float fs = std::max(14.0f, ds.y * 0.028f), pad = fs * 0.35f;
+				float y = ds.y * 0.205f;
+				zl.clear();   // the killfeed runs in-game now (game's own message lines), not as an overlay
+				for (const auto& z : zl)
+				{
+					const float alter = static_cast<float>(jetzt - z.ms) / 1000.0f;
+					if (alter < 0.0f || alter > 6.0f) continue;
+					const float al = alter > 5.0f ? 6.0f - alter : 1.0f, ein = std::min(1.0f, alter / 0.15f);
+					const std::string k = z.killer.empty() ? std::string() : z.killer, o = z.opfer == "?" ? std::string() : z.opfer;
+					const char* mitte = (z.fl & 4) ? "  //  " : "  >>  ";
+					const ImVec2 sk = tf->CalcTextSizeA(fs, FLT_MAX, 0, k.c_str()), sm = tf->CalcTextSizeA(fs, FLT_MAX, 0, mitte), so = tf->CalcTextSizeA(fs, FLT_MAX, 0, o.c_str());
+					const float w = sk.x + sm.x + so.x + pad * 2;
+					const float x = ds.x - fs * 0.8f - w + (1.0f - ein) * w * 0.3f;
+					const bool ich = (z.fl & 3) != 0;
+					dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + fs + pad), ich ? IM_COL32(60, 40, 0, static_cast<int>(170 * al)) : IM_COL32(0, 0, 0, static_cast<int>(140 * al)), fs * 0.2f);
+					if (ich) dl->AddRect(ImVec2(x, y), ImVec2(x + w, y + fs + pad), IM_COL32(255, 200, 70, static_cast<int>(200 * al)), fs * 0.2f, 1.5f);
+					float cx = x + pad; const float cy = y + pad * 0.5f;
+					auto txt = [&](const std::string& t2, ImU32 c, const ImVec2& sz) { dl->AddText(tf, fs, ImVec2(cx + 1, cy + 1), IM_COL32(0, 0, 0, static_cast<int>(200 * al)), t2.c_str()); dl->AddText(tf, fs, ImVec2(cx, cy), c, t2.c_str()); cx += sz.x; };
+					const auto mitA = [&](ImU32 c) { return (c & 0x00FFFFFFu) | (static_cast<ImU32>(255 * al) << 24); };
+					txt(k, mitA((z.fl & 1) ? IM_COL32(255, 210, 90, 255) : IM_COL32(120, 200, 255, 255)), sk);
+					txt(mitte, mitA(IM_COL32(255, 90, 60, 255)), sm);
+					txt(o, mitA((z.fl & 2) ? IM_COL32(255, 210, 90, 255) : IM_COL32(235, 235, 235, 255)), so);
+					y += fs + pad + fs * 0.25f;
+				}
+				// scoreboard (hold Select on the pad or Tab on the keyboard) - replaces the game's own score screen in Online+
+				const u32 b = ps2xosd::btns.load();
+				static const bool tafelImmer = std::getenv("PS2XGS_TAFEL_IMMER") != nullptr;   // tests: always show it
+				if (((b & 1u) || ps2xfeed::tab.load() || tafelImmer) && ps2xfeed::imMatch())
+				{
+					struct E { std::string n; int k, d, su, serie, best; bool ich; };
+					std::vector<E> e; size_t p0 = 0;
+					while (p0 < tafel.size())
+					{
+						const size_t nl = tafel.find('\n', p0); const std::string l = tafel.substr(p0, nl == std::string::npos ? std::string::npos : nl - p0);
+						p0 = nl == std::string::npos ? tafel.size() : nl + 1;
+						std::vector<std::string> f; size_t q = 0;
+						while (true) { const size_t t2 = l.find('\t', q); f.push_back(l.substr(q, t2 == std::string::npos ? std::string::npos : t2 - q)); if (t2 == std::string::npos) break; q = t2 + 1; }
+						if (f.size() < 4) continue;
+						auto zi = [&](size_t i) { return i < f.size() ? std::atoi(f[i].c_str()) : 0; };
+						e.push_back({f[0], zi(1), zi(2), zi(4), zi(5), zi(6), f[3] == "1"});
+					}
+					auto punkte = [](const E& x) { return x.k - x.su; };
+					std::stable_sort(e.begin(), e.end(), [&](const E& x, const E& y2) { return punkte(x) != punkte(y2) ? punkte(x) > punkte(y2) : x.d < y2.d; });
+					ImFont* kf = ps2xschrift::kopf(); if (!kf) kf = ImGui::GetFont();
+					const float zh = fs * 1.45f, bw = std::min(ds.x * 0.86f, fs * 40.0f), x0 = (ds.x - bw) * 0.5f;
+					const float hh = fs * 2.7f, y0 = ds.y * 0.10f, h = hh + zh * (std::max<size_t>(e.size(), 1) + 1) + fs * 3.4f;
+					dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + bw, y0 + h), IM_COL32(8, 10, 24, 232), fs * 0.4f);
+					dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + bw, y0 + h), IM_COL32(80, 160, 255, 200), fs * 0.4f, 2.0f);
+					dl->AddText(kf, fs * 1.3f, ImVec2(x0 + fs, y0 + fs * 0.6f), IM_COL32(110, 210, 255, 255), "SCOREBOARD");
+					const int lv = ps2xstats::level();
+					const std::string rg = fmt::format("LV {}  {}", lv, ps2xRang(lv));
+					const ImVec2 rs = tf->CalcTextSizeA(fs, FLT_MAX, 0, rg.c_str());
+					dl->AddText(tf, fs, ImVec2(x0 + bw - fs - rs.x, y0 + fs * 0.85f), ps2xRangFarbe(lv), rg.c_str());
+					// columns: # | player | score | kills | deaths | suicides | K/D | streak | best
+					const float sp[] = {x0 + fs, x0 + fs * 2.6f, x0 + bw - fs * 24.0f, x0 + bw - fs * 20.5f, x0 + bw - fs * 17.0f, x0 + bw - fs * 13.3f,
+						x0 + bw - fs * 9.6f, x0 + bw - fs * 6.4f, x0 + bw - fs * 3.2f};
+					const char* kopfz[] = {"#", "PLAYER", "SCORE", "KILLS", "DEATHS", "SUIC.", "K/D", "STREAK", "BEST"};
+					float yy = y0 + hh;
+					for (int i = 0; i < 9; ++i) dl->AddText(tf, fs * 0.82f, ImVec2(sp[i], yy), IM_COL32(140, 150, 180, 255), kopfz[i]);
+					yy += zh;
+					int platz = 0; const E* ich = nullptr; int meinPlatz = 0;
+					for (const auto& x : e)
+					{
+						++platz;
+						if (x.ich) { ich = &x; meinPlatz = platz; dl->AddRectFilled(ImVec2(x0 + fs * 0.4f, yy - fs * 0.15f), ImVec2(x0 + bw - fs * 0.4f, yy + fs * 1.2f), IM_COL32(70, 50, 0, 200), fs * 0.2f); }
+						const ImU32 c = x.ich ? IM_COL32(255, 210, 90, 255) : (platz == 1 ? IM_COL32(255, 240, 180, 255) : IM_COL32(230, 230, 235, 255));
+						const std::string sv[] = {std::to_string(platz), x.ich ? std::string("YOU") : x.n, std::to_string(punkte(x)), std::to_string(x.k), std::to_string(x.d), std::to_string(x.su),
+							fmt::format("{:.2f}", x.d ? static_cast<float>(x.k) / x.d : static_cast<float>(x.k)), std::to_string(x.serie), std::to_string(x.best)};
+						for (int i = 0; i < 9; ++i) dl->AddText(tf, fs, ImVec2(sp[i], yy), c, sv[i].c_str());
+						yy += zh;
+					}
+					if (e.empty()) dl->AddText(tf, fs, ImVec2(sp[1], yy), IM_COL32(160, 160, 170, 255), "Waiting for match data...");
+					// footer: own progress this session
+					yy = y0 + h - fs * 2.6f;
+					dl->AddLine(ImVec2(x0 + fs, yy - fs * 0.3f), ImVec2(x0 + bw - fs, yy - fs * 0.3f), IM_COL32(80, 160, 255, 120), 1.5f);
+					const long long xp = ps2xstats::xp(), a0 = ps2xstats::xpFuer(lv), b0 = ps2xstats::xpFuer(lv + 1);
+					const std::string fz = ich ? fmt::format("Place {} of {}    Kills {}    Best streak {}    XP {} / {}", meinPlatz, e.size(), ich->k, ich->best, xp, lv >= 50 ? xp : b0)
+					                            : fmt::format("XP {} / {}", xp, lv >= 50 ? xp : b0);
+					dl->AddText(tf, fs * 0.95f, ImVec2(x0 + fs, yy), IM_COL32(200, 205, 220, 255), fz.c_str());
+					const float bx0 = x0 + fs, bx1 = x0 + bw - fs, by = yy + fs * 1.3f;
+					const float frac = lv >= 50 ? 1.0f : std::clamp(static_cast<float>(xp - a0) / static_cast<float>(std::max(1LL, b0 - a0)), 0.0f, 1.0f);
+					dl->AddRectFilled(ImVec2(bx0, by), ImVec2(bx1, by + fs * 0.45f), IM_COL32(40, 45, 70, 255), fs * 0.2f);
+					dl->AddRectFilled(ImVec2(bx0, by), ImVec2(bx0 + (bx1 - bx0) * frac, by + fs * 0.45f), ps2xRangFarbe(lv), fs * 0.2f);
 				}
 			}
 			{
@@ -2219,7 +2580,8 @@ static bool s_onlineTabWaehlen = false;
 					dl->AddText(p0, IM_COL32(245, 222, 160, static_cast<int>(255 * al)), tt.c_str());
 				}
 			}
-			if (t < 15.0f)
+			static const bool hinweisAus = std::getenv("TS2_LAUNCHER") != nullptr;   // launcher users got the hint after the setup
+			if (t < 15.0f && !hinweisAus)
 			{
 				const float a = std::clamp((15.0f - t) / 2.0f, 0.0f, 1.0f);
 				const char* txt = tr("Menu: ESC / F1   |   Gamepad: Select + Start (or Guide)");
@@ -2250,7 +2612,151 @@ static bool s_onlineTabWaehlen = false;
 		bool closeReq = false, quitReq = false;
 		sprache.store(c.lang < 0 ? spracheAuto() : c.lang);
 
-		// Kopf: Spieltitel (cyan), rechts Sprache; darunter gruene Zeile mit den Tasten
+		if (s_hubModus)
+		{
+			// ---- Online+ hub (opened from the game's main menu item "Online+") ----
+			const ImVec4 gold(1.00f, 0.80f, 0.32f, 1.0f), cyan(0.42f, 0.86f, 1.00f, 1.0f);
+			ImGui::PushFont(ps2xschrift::text(), ImGui::GetFontSize() * 1.2f);
+			ImGui::PushFont(ps2xschrift::kopf(), ImGui::GetFontSize() * 1.9f);
+			ImGui::TextColored(cyan, "ONLINE");
+			ImGui::SameLine(0, 0);
+			ImGui::TextColored(gold, "+");
+			ImGui::PopFont();
+			ImGui::SameLine(0, ImGui::GetFontSize() * 1.5f);
+			{
+				const int lv = ps2xstats::level();
+				ImGui::BeginGroup();
+				ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.5f));
+				ImGui::TextColored(gold, "%s %d", tr("Level"), lv);
+				ImGui::SameLine();
+				ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ps2xRangFarbe(lv)), "%s", ps2xRang(lv));
+				ImGui::EndGroup();
+			}
+			ImGui::TextDisabled("%s", tr("TimeSplitters 2 Online+ - online play, progression and extra impact."));
+			ImGui::Spacing();
+			static int seite = 0;
+			// PS2XGS_DEMO=<bot match code> (showcase recordings): show every hub page for a moment, then start that bot match
+			static const int demoCode = [] { const char* e = std::getenv("PS2XGS_DEMO"); return e ? std::atoi(e) : 0; }();
+			static double demoAb = -1.0; static bool demoFertig = false; static bool demoStart = false;
+			if (demoCode > 0 && !demoFertig)
+			{
+				if (demoAb < 0) demoAb = ImGui::GetTime();
+				const double d = ImGui::GetTime() - demoAb;
+				const int folge[] = {2, 3, 1, 0};
+				const int i = static_cast<int>(d / 2.6);
+				if (i < 4) seite = folge[i]; else { demoFertig = true; demoStart = true; }
+			}
+			const char* seiten[] = {tr("BOT MATCH"), tr("PLAY ONLINE"), tr("PROFILE & STATS"), tr("SETTINGS")};
+			const float bw = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 3) / 4.0f;
+			for (int i = 0; i < 4; ++i)
+			{
+				if (i) ImGui::SameLine();
+				const bool akt = seite == i;
+				ImGui::PushStyleColor(ImGuiCol_Button, akt ? ImVec4(0.16f, 0.36f, 0.62f, 1.0f) : ImVec4(0.10f, 0.12f, 0.20f, 0.95f));
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.46f, 0.78f, 1.0f));
+				ImGui::PushFont(ps2xschrift::kopf(), ImGui::GetFontSize() * 0.85f);
+				if (ImGui::Button(seiten[i], ImVec2(bw, ImGui::GetFontSize() * 2.0f))) seite = i;
+				ImGui::PopFont();
+				ImGui::PopStyleColor(2);
+			}
+			ImGui::Spacing();
+			const float fussH = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 2;
+			ImGui::BeginChild("##hub", ImVec2(0, -fussH), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+			if (seite == 0)
+			{
+				static int modus = 0, karte = 0, botSet = 0;
+				if (demoCode > 0) { const int v = demoCode - 1; karte = v & 15; modus = (v >> 4) % 3; botSet = std::min((v >> 4) / 3, kBotSetsN - 1); }
+				const char* kModi[] = {"Deathmatch", "Team Deathmatch", "Capture the Bag"};
+				ImGui::TextWrapped("%s", tr("Jump straight into a match against bots. Pick a mode and a map, the game sets everything up for you."));
+				ImGui::Spacing();
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+				combo(tr("Mode"), &modus, kModi, 3);
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+				const bool ctb = (modus == 2);
+				const int kartenN = ctb ? kBotKartenCtbN : kBotKartenN;
+				if (karte >= kartenN) karte = 0;
+				combo(tr("Map"), &karte, ctb ? kBotKartenCtb : kBotKarten, kartenN);
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+				combo(tr("Opponents"), &botSet, kBotSets, kBotSetsN);
+				ImGui::Spacing();
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.45f, 0.10f, 1.0f));
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.58f, 0.18f, 1.0f));
+				ImGui::PushFont(ps2xschrift::kopf(), ImGui::GetFontSize() * 1.0f);
+				if (ImGui::Button(tr("START BOT MATCH"), ImVec2(ImGui::GetFontSize() * 14, ImGui::GetFontSize() * 2.2f)))
+				{
+					botAnfrage.store(1 + (botSet * 3 + modus) * 16 + karte);
+					closeReq = true;
+				}
+				if (demoStart) { demoStart = false; botAnfrage.store(demoCode); closeReq = true; }
+				ImGui::PopFont();
+				ImGui::PopStyleColor(2);
+				ImGui::TextDisabled("%s", tr("Don't touch the controller for a few seconds while the menus run."));
+				ImGui::TextDisabled("%s", tr("* = has to be unlocked in the game first (Arcade League / Challenge)."));
+			}
+			else if (seite == 1)
+			{
+				if (online::aktiv()) onlineTab(c, closeReq);
+				else ImGui::TextWrapped("%s", tr("Online play is not available in this start mode."));
+			}
+			else if (seite == 2)
+			{
+				const int lv = ps2xstats::level(); const long long x = ps2xstats::xp();
+				const long long a0 = ps2xstats::xpFuer(lv), b0 = ps2xstats::xpFuer(lv + 1);
+				ImGui::PushFont(ps2xschrift::kopf(), ImGui::GetFontSize() * 1.3f);
+				ImGui::TextColored(gold, "%s %d", tr("Level"), lv);
+				ImGui::SameLine(0, ImGui::GetFontSize() * 0.8f);
+				ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ps2xRangFarbe(lv)), "%s", ps2xRang(lv));
+				ImGui::PopFont();
+				if (lv < 50) ImGui::TextDisabled("%s %s (%s %d)", tr("Next rank:"), ps2xRang(std::min(50, (lv / 5 + 1) * 5)), tr("Level"), std::min(50, (lv / 5 + 1) * 5));
+				ImGui::ProgressBar(lv >= 50 ? 1.0f : static_cast<float>(x - a0) / static_cast<float>(std::max(1LL, b0 - a0)), ImVec2(-1, ImGui::GetFontSize() * 1.4f),
+					fmt::format("{} / {} XP", x, lv >= 50 ? x : b0).c_str());
+				ImGui::Spacing();
+				if (ImGui::BeginTable("##stats", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
+				{
+					auto zeile = [](const char* k, const std::string& v) { ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(k); ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str()); };
+					zeile(tr("Kills"), std::to_string(ps2xstats::kills()));
+					zeile(tr("Hits"), std::to_string(ps2xstats::hits()));
+					zeile(tr("Total XP"), std::to_string(x));
+					zeile(tr("XP to next level"), lv >= 50 ? std::string("-") : std::to_string(b0 - x));
+					ImGui::EndTable();
+				}
+				ImGui::Spacing();
+				ImGui::TextDisabled("%s", tr("Hit +10 XP, kill +100 XP. Saved locally; online servers will track it later."));
+			}
+			else
+			{
+				bool an = c.impact != 0;
+				if (ImGui::Checkbox(tr("Impact effects (Online+)"), &an)) c.impact = an ? 1 : 0;
+				ImGui::BeginDisabled(!an);
+				bool mk = c.impactMarker != 0;
+				if (ImGui::Checkbox(tr("Hit and kill markers"), &mk)) c.impactMarker = mk ? 1 : 0;
+				bool sn = c.impactSound != 0;
+				if (ImGui::Checkbox(tr("Hit and kill sounds"), &sn)) c.impactSound = sn ? 1 : 0;
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+				ImGui::SliderInt(tr("Camera kick when hit"), &c.impactKick, 0, 100, "%d %%");
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+				ImGui::SliderInt(tr("Recoil punch when firing"), &c.impactRecoil, 0, 100, "%d %%");
+				bool an2 = c.impactAnsage != 0;
+				if (ImGui::Checkbox(tr("Multi-kill and streak announcer"), &an2)) c.impactAnsage = an2 ? 1 : 0;
+				bool rd = c.impactRand != 0;
+				if (ImGui::Checkbox(tr("Red screen edge when hit"), &rd)) c.impactRand = rd ? 1 : 0;
+				ImGui::EndDisabled();
+				ImGui::Spacing();
+				ImGui::TextDisabled("%s", tr("All other settings: ESC / F1 during the game."));
+			}
+			ImGui::EndChild();
+			ImGui::Separator();
+			const float bw2 = ImGui::CalcTextSize(tr("  Back to main menu  ")).x + ImGui::GetStyle().FramePadding.x * 2;
+			ImGui::SetCursorPosX(ImGui::GetWindowWidth() - bw2 - ImGui::GetStyle().WindowPadding.x);
+			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.45f, 0.22f, 0.95f));
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.65f, 0.30f, 1.0f));
+			if (ImGui::Button(tr("  Back to main menu  "))) closeReq = true;
+			ImGui::PopStyleColor(2);
+			ImGui::PopFont();
+		}
+		else
+		{
+		// Header: game title (cyan), language on the right; below it a green line with the keys
 		{
 			const ImVec4 cyan(0.42f, 0.86f, 1.00f, 1.0f), green(0.50f, 1.00f, 0.42f, 1.0f);
 			ImGui::PushFont(nullptr, ImGui::GetFontSize() * 1.7f);
@@ -2269,7 +2775,7 @@ static bool s_onlineTabWaehlen = false;
 		}
 
 		const auto head = [](const char* t) { ImGui::SeparatorText(t); };
-		// Inhalt scrollt in einem eigenen Bereich, die Fusszeile bleibt immer sichtbar
+		// The content scrolls in its own area, the footer always stays visible
 		const float fussH = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 2;
 		ImGui::BeginChild("##inhalt", ImVec2(0, -fussH), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
 		if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_FittingPolicyScroll))
@@ -2279,10 +2785,10 @@ static bool s_onlineTabWaehlen = false;
 				ImGui::TextDisabled("%s:", tr("Preset"));
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Remaster (sharp)")))
-				{ c.upscale = 4; c.aniso = 16; c.filter = 2; c.cas = 1; c.casSharp = 25; c.fxaa = false; c.tv = 0; c.shadeboost = false; c.dither = 0; c.camBlur = 1; c.nachzieh = 0; c.aspect = 0; }
+				{ c.upscale = 4; c.aniso = 16; c.filter = 2; c.cas = 1; c.casSharp = 25; c.fxaa = false; c.tv = 0; c.shadeboost = false; c.dither = 0; c.camBlur = 1; c.nachzieh = 0; c.scope = 1; c.aspect = 0; }
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Original look")))
-				{ c.upscale = 1; c.aniso = 0; c.filter = 2; c.cas = 0; c.fxaa = false; c.tv = 5; c.shadeboost = false; c.aspect = 2; c.dither = 2; c.camBlur = 1; c.nachzieh = 1; }
+				{ c.upscale = 1; c.aniso = 0; c.filter = 2; c.cas = 0; c.fxaa = false; c.tv = 5; c.shadeboost = false; c.aspect = 2; c.dither = 2; c.camBlur = 1; c.nachzieh = 1; c.scope = 0; }
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Performance")))
 				{ c.upscale = 2; c.aniso = 4; c.filter = 2; c.cas = 1; c.casSharp = 40; c.fxaa = false; c.tv = 0; }
@@ -2322,6 +2828,11 @@ static bool s_onlineTabWaehlen = false;
 					bool nz = c.nachzieh != 0;
 					if (ImGui::Checkbox(tr("Original frame blending (ghosting when turning)"), &nz)) c.nachzieh = nz ? 1 : 0;
 					ImGui::TextDisabled("%s", tr("The PS2 game blends the previous frame half over the new one. Off = clear picture."));
+				}
+				{
+					const char* kScEn[] = {"Original (smeared)", "Clear", "Extra clear"};
+					const char* kScDe[] = {"Original (verschwommen)", "Klar", "Extra klar"};
+					combo(tr("Sniper scope"), &c.scope, sprache.load() == 1 ? kScDe : kScEn, 3);
 				}
 				ImGui::Checkbox(tr("Anti-aliasing (FXAA)"), &c.fxaa);
 				static const char* kCasEn[] = {"Off", "Sharpen", "Sharpen + upscale"};
@@ -2375,13 +2886,21 @@ static bool s_onlineTabWaehlen = false;
 					ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
 					ImGui::SliderInt(tr("Zoom sensitivity"), &c.zoomSens, 5, 200, "%d %%");
 					ImGui::Checkbox(tr("Invert vertical"), &c.mausInvert);
-					ImGui::Checkbox(tr("Original crosshair while using the mouse (holds aim mode)"), &c.mausZielmodus);
+					(void)c.mausZielmodus;   // mouse aiming always uses the exact aim mode now (ts2_override maus::tick)
+					{
+						const char* kFkEn[] = {"Cross", "Dot", "Circle", "Off"};
+						const char* kFkDe[] = {"Kreuz", "Punkt", "Kreis", "Aus"};
+						ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+						ImGui::Combo(tr("Crosshair"), &c.fadenkreuz, sprache.load() == 1 ? kFkDe : kFkEn, 4);
+						ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+						ImGui::SliderInt(tr("Look up/down limit"), &c.nickMax, 40, 85, "%d\xC2\xB0");
+					}
 					ImGui::TextDisabled("%s", tr("Click into the game to capture the mouse, ESC or F1 releases it."));
 				}
 				head(tr("Key bindings"));
 				ImGui::TextDisabled("%s", tr("Click a field, then press a key or mouse button. Delete clears, ESC cancels."));
 				{
-					// Ergebnis aus dem Fenster-Thread uebernehmen
+					// take over the result from the window thread
 					const int la = lernAktion.load();
 					if (la >= 0)
 					{
@@ -2424,6 +2943,46 @@ static bool s_onlineTabWaehlen = false;
 				{
 					for (int i = 0; i < kAnzAktionen; ++i) { c.bel[i][0] = kAktionen[i].std1; c.bel[i][1] = kAktionen[i].std2; }
 					c.belVersion = kBelegungVersion;
+				}
+				ImGui::EndTabItem();
+			}
+			if (onlinePlus() && ImGui::BeginTabItem(tr("Online+"), nullptr, s_opTabWaehlen ? ImGuiTabItemFlags_SetSelected : 0))
+			{
+				s_opTabWaehlen = false;
+				ImGui::SeparatorText(tr("Play online"));
+				if (online::aktiv())
+				{
+					if (ImGui::Button(tr("Open server browser"))) { s_onlineTabWaehlen = true; Cfg c0 = c; online::aktualisieren(c0.onlineFavs, c0.onlineServer); }
+					ImGui::SameLine(); ImGui::TextDisabled("%s", tr("Join a server, then pick Network Game in the game."));
+				}
+				else ImGui::TextDisabled("%s", tr("Online play is not available in this start mode."));
+				ImGui::SeparatorText(tr("Effects"));
+				bool an = c.impact != 0;
+				if (ImGui::Checkbox(tr("Impact effects (Online+)"), &an)) c.impact = an ? 1 : 0;
+				ImGui::TextDisabled("%s", tr("Extra feedback on top of the original game. Off = the game exactly as on the PS2."));
+				ImGui::BeginDisabled(!an);
+				bool mk = c.impactMarker != 0;
+				if (ImGui::Checkbox(tr("Hit and kill markers"), &mk)) c.impactMarker = mk ? 1 : 0;
+				bool sn = c.impactSound != 0;
+				if (ImGui::Checkbox(tr("Hit and kill sounds"), &sn)) c.impactSound = sn ? 1 : 0;
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+				ImGui::SliderInt(tr("Camera kick when hit"), &c.impactKick, 0, 100, "%d %%");
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+				ImGui::SliderInt(tr("Recoil punch when firing"), &c.impactRecoil, 0, 100, "%d %%");
+				bool an2 = c.impactAnsage != 0;
+				if (ImGui::Checkbox(tr("Multi-kill and streak announcer"), &an2)) c.impactAnsage = an2 ? 1 : 0;
+				bool rd = c.impactRand != 0;
+				if (ImGui::Checkbox(tr("Red screen edge when hit"), &rd)) c.impactRand = rd ? 1 : 0;
+				ImGui::EndDisabled();
+				head(tr("Progress"));
+				{
+					const int lv = ps2xstats::level(); const long long x = ps2xstats::xp();
+					const long long a = ps2xstats::xpFuer(lv), b = ps2xstats::xpFuer(lv + 1);
+					ImGui::Text("%s %d", tr("Level"), lv);
+					ImGui::ProgressBar(lv >= 50 ? 1.0f : static_cast<float>(x - a) / static_cast<float>(std::max(1LL, b - a)), ImVec2(ImGui::GetFontSize() * 18, 0),
+						fmt::format("{} / {} XP", x, lv >= 50 ? x : b).c_str());
+					ImGui::Text("%s: %d    %s: %d", tr("Kills"), ps2xstats::kills(), tr("Hits"), ps2xstats::hits());
+					ImGui::TextDisabled("%s", tr("Hit +10 XP, kill +100 XP. Saved locally; online servers will track it later."));
 				}
 				ImGui::EndTabItem();
 			}
@@ -2488,6 +3047,7 @@ static bool s_onlineTabWaehlen = false;
 			if (ImGui::Button(tr("  Quit game  ")))
 				quitReq = true;
 		}
+		}
 		if (ImGui::IsWindowAppearing())
 			ImGui::SetKeyboardFocusHere(-1);
 		ImGui::End();
@@ -2497,7 +3057,7 @@ static bool s_onlineTabWaehlen = false;
 		{
 			{ std::lock_guard<std::mutex> lk(m); cfg = c; }
 			if (c.fullscreen != before.fullscreen) fsPending.store(true);
-			// Anwenden erst, wenn sich ~0,3 s nichts mehr aendert (Schieberegler ziehen = sonst jedes Bild neu anwenden -> Ruckeln)
+			// Apply only when nothing has changed for ~0.3 s (dragging a slider would otherwise re-apply every frame -> stutter)
 			applyAt.store(ImGui::GetTime() + 0.3);
 			save();
 		}
@@ -2513,7 +3073,7 @@ static bool s_onlineTabWaehlen = false;
 	}
 }
 
-// ---- ps2x: Eingabe direkt im Spielfenster (Tastatur) + Gamepad ueber SDL3 (auch ohne Fokus) ----------------
+// ---- ps2x: input directly in the game window (keyboard) + gamepad through SDL3 (also without focus) ----------------
 #include <SDL3/SDL.h>
 #ifndef _WIN32
 #include <X11/keysym.h>
@@ -2521,24 +3081,24 @@ static bool s_onlineTabWaehlen = false;
 #endif
 namespace ps2xin
 {
-	// PS2-Tastenbits (1 = gedrueckt), wie libpad: Select L3 R3 Start Up Right Down Left L2 R2 L1 R1 Tri Circle Cross Square
+	// PS2 button bits (1 = pressed), as in libpad: Select L3 R3 Start Up Right Down Left L2 R2 L1 R1 Tri Circle Cross Square
 	enum : u16 { SELECT = 0x0001, L3 = 0x0002, R3 = 0x0004, START = 0x0008, UP = 0x0010, RIGHT = 0x0020, DOWN = 0x0040, LEFT = 0x0080,
 		L2 = 0x0100, R2 = 0x0200, L1 = 0x0400, R1 = 0x0800, TRI = 0x1000, CIRCLE = 0x2000, CROSS = 0x4000, SQUARE = 0x8000 };
-	std::atomic<u32> keyBtns{0};      // Tastatur -> Tasten
+	std::atomic<u32> keyBtns{0};      // keyboard -> buttons
 	std::atomic<u32> keyStick{0};     // Tastatur -> Sticks: Bits 0-3 links (oben unten links rechts), 4-7 rechts
 	std::atomic<u32> padBtns{0};
 	std::atomic<u32> padAxes{0x80808080u}; // lx | ly<<8 | rx<<16 | ry<<24
 	std::atomic<bool> padOn{false};
 	std::atomic<u32> rumble{0}; // lo = kleiner Motor, hi = grosser Motor (0..65535)
-	// Mauszielen: relative Bewegung seit der letzten Abfrage durch das Spiel, nur solange die Maus gefangen ist
+	// Mouse aiming: relative movement since the game's last query, only while the mouse is captured
 	std::atomic<int> mausDX{0}, mausDY{0};
 	std::atomic<bool> mausGefangen{false};
-	std::atomic<bool> mausNeu{false};  // erstes Bewegungsereignis nach dem Fangen: nur Startposition merken
+	std::atomic<bool> mausNeu{false};  // first motion event after capturing: only remember the start position
 	std::atomic<u32> mausTasten{0};   // (alt, ungenutzt)
 	std::atomic<int> mausRad{0};      // (alt, ungenutzt)
-	std::atomic<u32> aktivA{0};       // gedrueckte Aktionen (Bit = Aktionsnummer), Tastatur + Maus
+	std::atomic<u32> aktivA{0};       // pressed actions (bit = action number), keyboard + mouse
 	std::atomic<int> impulse[32] = {}; // Mausrad: anstehende kurze Druecke je Aktion
-	// Aktion ueber Tastatur/Maus gedrueckt/losgelassen -> keyBtns/keyStick neu berechnen
+	// action pressed/released through keyboard/mouse -> recompute keyBtns/keyStick
 	void neuBerechnen()
 	{
 		const u32 a = aktivA.load();
@@ -2551,7 +3111,7 @@ namespace ps2xin
 			}
 		keyBtns.store(b); keyStick.store(st);
 	}
-	// Code (KeySym oder kMaus+Knopf) gedrueckt/losgelassen; Rad-Codes erzeugen einen Impuls
+	// code (KeySym or kMaus+button) pressed/released; wheel codes create an impulse
 	void code(int c, bool down)
 	{
 		if (c == 0) return;
@@ -2584,13 +3144,13 @@ namespace ps2xin
 	std::atomic<u32> xBtns[3] = {0, 0, 0};
 	std::atomic<u32> xAxes[3] = {0x80808080u, 0x80808080u, 0x80808080u};
 	std::atomic<bool> xOn[3] = {false, false, false};
-	// Zuletzt benutztes Eingabegeraet: Steam (Deck, Desktop-Modus) schickt zum Gamepad zusaetzlich Tastatur/Maus-
-	// Ereignisse (D-Pad = Pfeiltasten, B = Esc ...). Solange das Gamepad aktiv ist, zaehlt die Tastatur nicht als Pad.
+	// Last input device used: Steam (Deck, desktop mode) sends keyboard/mouse events in addition to the gamepad
+	// (D-pad = arrow keys, B = Esc ...). While the gamepad is active, the keyboard does not count as a pad.
 	std::atomic<long long> padAktivMs{-100000};
 	long long jetztMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 	bool padAktiv() { return jetztMs() - padAktivMs.load() < 1500; }
-	// Letzte echte Maus-/Tastatur-Eingabe. Wird danach das Gamepad benutzt, gibt die Bridge die Maus frei
-	// (Steam Deck: Touchscreen-Tippen oder Trackpad faengt sonst die Maus, und das Spiel bleibt im Maus-Zielmodus).
+	// Last real mouse/keyboard input. If the gamepad is used afterwards, the bridge releases the mouse
+	// (Steam Deck: a touchscreen tap or the trackpad would otherwise capture the mouse and the game would stay in mouse aiming).
 	std::atomic<long long> mausAktivMs{-100000};
 	bool padSeitMaus() { return padAktivMs.load() > mausAktivMs.load() + 250; }
 
@@ -2658,12 +3218,12 @@ namespace ps2xin
 			sdlOk = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
 			if (!sdlOk)
 			{
-				Console.Error(fmt::format("[ps2x] Gamepad-Unterstuetzung (SDL) nicht verfuegbar: {}", SDL_GetError()));
+				Console.Error(fmt::format("[ps2x] gamepad support (SDL) not available: {}", SDL_GetError()));
 				return;
 			}
 			int n0 = 0;
 			if (SDL_JoystickID* ids0 = SDL_GetJoysticks(&n0)) SDL_free(ids0);
-			Console.WriteLn(fmt::format("[ps2x] SDL bereit, {} Controller gefunden", n0));
+			Console.WriteLn(fmt::format("[ps2x] SDL ready, {} controller(s) found", n0));
 		}
 		SDL_PumpEvents();
 		SDL_UpdateGamepads();
@@ -2702,7 +3262,7 @@ namespace ps2xin
 		if (SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000) m |= R2;
 		auto ax = [](SDL_GamepadAxis a) -> u32 { const int v = SDL_GetGamepadAxis(gp, a); return static_cast<u32>((v + 32768) >> 8) & 0xFFu; };
 		{
-			// Menue: Guide-Taste oder Select+Start; im Menue steuert das Pad die Navigation
+			// Menu: Guide button or Select+Start; in the menu the pad drives the navigation
 			static bool s_prevToggle = false;
 			const bool tog = btn(SDL_GAMEPAD_BUTTON_GUIDE) || (btn(SDL_GAMEPAD_BUTTON_BACK) && btn(SDL_GAMEPAD_BUTTON_START));
 			if (tog && !s_prevToggle)
@@ -2724,7 +3284,7 @@ namespace ps2xin
 				s_prevPadNav = nb;
 				m = 0;
 			}
-			// Vibration (vom Spiel ueber ps2xgs_rumble)
+			// Vibration (from the game through ps2xgs_rumble)
 			static u32 s_lastRumble = 0;
 			const u32 r = rumble.load();
 			bool on; int pct;
@@ -2750,7 +3310,7 @@ namespace ps2xin
 		pollExtraPads();
 	}
 
-	// ps2x: Spieler 2-4 = die weiteren angeschlossenen Gamepads in SDL-Reihenfolge (ohne das von Spieler 1)
+	// ps2x: players 2-4 = the other connected gamepads in SDL order (without player 1's)
 	void pollExtraPads()
 	{
 		const SDL_JoystickID first = gp ? SDL_GetGamepadID(gp) : 0;
@@ -2803,7 +3363,7 @@ namespace ps2xin
 
 namespace ps2xmenu
 {
-	// CPU-Thread (Live-Wiedergabe): Einstellungen anwenden; waehrend das Menue offen ist (Spiel pausiert) neu zeichnen
+	// CPU thread (live playback): apply settings; redraw while the menu is open (game paused)
 	void cpuHook()
 	{
 		if (applyPending.exchange(false))
@@ -2821,7 +3381,7 @@ namespace ps2xmenu
 				ps2xin::toggleFullscreen(s_display, s_window);
 		}
 		{
-			// Ton: Lautstaerke nachfuehren, im Menue anhalten
+			// Sound: track the volume, pause in the menu
 			static int s_vol = -1;
 			static bool s_paused = false;
 			int vol;
@@ -2843,9 +3403,10 @@ namespace ps2xmenu
 	}
 }
 
-// Tastatur im Spielfenster (X11 und Win32): Hotkeys, Menuesteuerung, sonst PS2-Tasten
+// Keyboard in the game window (X11 and Win32): hotkeys, menu control, otherwise PS2 buttons
 static void ps2xKey(KeySym ks, bool down, bool alt)
 {
+	if (ks == XK_Tab) ps2xfeed::tab.store(down);
 	if (down && ps2xin::mausGefangen.load()) ps2xin::mausAktivMs.store(ps2xin::jetztMs());
 	if (ps2xmenu::lernAktion.load() >= 0)
 	{
@@ -2857,11 +3418,11 @@ static void ps2xKey(KeySym ks, bool down, bool alt)
 		}
 		return;
 	}
-	// Maus gefangen = Tastatur/Maus ist das aktive Geraet, auch wenn ein Gamepad daneben liegt (Stick-Drift zaehlt als aktiv)
+	// Mouse captured = keyboard/mouse is the active device, even with a gamepad lying next to it (stick drift counts as active)
 	if (down && ps2xin::padAktiv() && !ps2xin::mausGefangen.load() && !(ks == XK_F7 || ks == XK_F8 || ks == XK_F9 || ks == XK_F10 || ks == XK_F11 || ks == XK_F12 || ks == XK_Print))
 	{
 		static int s_n = 0;
-		if (s_n++ < 3) Console.WriteLn("[ps2x] Tastatur-Ereignis ignoriert (Gamepad aktiv, z. B. Steam-Desktop-Belegung)");
+		if (s_n++ < 3) Console.WriteLn("[ps2x] keyboard event ignored (gamepad active, e.g. Steam desktop layout)");
 		return;
 	}
 		if (down && (ks == XK_F11 || (ks == XK_Return && alt)))
@@ -2924,13 +3485,13 @@ static void ps2xKey(KeySym ks, bool down, bool alt)
 				default: break;
 			}
 			if (bit) { if (down) ps2xmenu::nav.fetch_or(bit); else ps2xmenu::nav.fetch_and(~bit); }
-			if (!down) ps2xin::key(ks, false); // im Menue losgelassene Spieltasten nicht haengen lassen
+			if (!down) ps2xin::key(ks, false); // do not leave game keys hanging that were released inside the menu
 		}
 		else
 			ps2xin::key(ks, down);
 }
 
-// Maustaste (1 links, 2 Mitte, 3 rechts, 4/5 Rad, 8/9 Seite): im Lernmodus erfassen, im Fangmodus als belegte Aktion
+// Mouse button (1 left, 2 middle, 3 right, 4/5 wheel, 8/9 side): capture in learn mode, as a bound action in capture mode
 static bool ps2xMausLernen(int knopf, bool down)
 {
 	if (ps2xmenu::lernAktion.load() < 0) return false;
@@ -2943,7 +3504,7 @@ static void ps2xMausTaste(int knopf, bool down)
 	if (down) ps2xin::mausAktivMs.store(ps2xin::jetztMs());
 	ps2xin::code(ps2xmenu::kMaus + knopf, down);
 }
-static bool ps2xMausWill() // darf die Maus gefangen werden/bleiben?
+static bool ps2xMausWill() // may the mouse be/stay captured?
 {
 	bool an; { std::lock_guard<std::mutex> lk(ps2xmenu::m); an = ps2xmenu::cfg.maus; }
 	return an && !ps2xmenu::open.load() && !(ps2xin::mausGefangen.load() && ps2xin::padSeitMaus());
@@ -3000,8 +3561,8 @@ static KeySym ps2xVkToKeySym(WPARAM vk, LPARAM lp)
 		case VK_DECIMAL: return 0xffae;
 		default:
 			if (vk >= '0' && vk <= '9') return static_cast<KeySym>(vk);
-			// Satzzeichen, Umlaute usw.: das Zeichen der aktuellen Tastaturbelegung; im Latin-1-Bereich ist das
-			// KeySym gleich dem Zeichencode (wie XLookupKeysym unter X11), darueber Unicode-KeySym
+			// Punctuation, umlauts etc.: the character of the current keyboard layout; in the Latin-1 range the
+			// KeySym equals the character code (like XLookupKeysym on X11), above that a Unicode KeySym
 			if (const UINT ch = MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_CHAR) & 0x7FFFFFFFu; ch >= 0x20)
 			{
 				if (ch >= 'A' && ch <= 'Z') return static_cast<KeySym>('a' + (ch - 'A'));
@@ -3019,7 +3580,7 @@ static LRESULT CALLBACK ps2xWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		case WM_KEYDOWN:
 		case WM_SYSKEYDOWN:
 		{
-			if (lp & (1 << 30)) // Wiederholung beim Halten ignorieren (wie XkbSetDetectableAutoRepeat)
+			if (lp & (1 << 30)) // ignore auto-repeat while held (like XkbSetDetectableAutoRepeat)
 				return 0;
 			if (msg == WM_SYSKEYDOWN && wp == VK_F4)
 				break;
@@ -3033,7 +3594,7 @@ static LRESULT CALLBACK ps2xWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				ps2xKey(ks, false, false);
 			return 0;
 		case WM_SYSCHAR:
-			return 0; // kein Signalton bei Alt+Enter
+			return 0; // no beep on Alt+Enter
 		case WM_SYSCOMMAND:
 			if ((wp & 0xFFF0) == SC_KEYMENU)
 				return 0;
@@ -3063,8 +3624,8 @@ static LRESULT CALLBACK ps2xWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				}
 				else
 				{
-					// Absolute Bewegung (VM, Remote Desktop, Tablet-Modus): 0..65535 ueber den (virtuellen) Bildschirm,
-					// daraus die Differenz zur letzten Position bilden
+					// Absolute movement (VM, remote desktop, tablet mode): 0..65535 across the (virtual) screen,
+					// build the difference to the last position from it
 					static LONG letztX = -1, letztY = -1;
 					const bool virt = ri.data.mouse.usFlags & MOUSE_VIRTUAL_DESKTOP;
 					const LONG bw = GetSystemMetrics(virt ? SM_CXVIRTUALSCREEN : SM_CXSCREEN);
@@ -3130,19 +3691,19 @@ static LRESULT CALLBACK ps2xWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			return 0;
 		case WM_TIMER:
 			ps2xin::pollPad(); // Gamepad ~250 Hz
-			if (ps2xin::mausGefangen.load() && !ps2xMausWill()) // Menue geoeffnet / Mauszielen aus -> freigeben
+			if (ps2xin::mausGefangen.load() && !ps2xMausWill()) // menu opened / mouse aiming off -> release
 			{
 				ps2xin::mausGefangen.store(false);
 				ClipCursor(nullptr);
 			}
 			return 0;
 		case WM_SETCURSOR:
-			if (LOWORD(lp) == HTCLIENT && !ps2xmenu::open.load()) { SetCursor(nullptr); return TRUE; } // Mauszeiger nur im Menue
+			if (LOWORD(lp) == HTCLIENT && !ps2xmenu::open.load()) { SetCursor(nullptr); return TRUE; } // mouse pointer only in the menu
 			break;
 		case WM_CLOSE:
 			ps2xhot::aufnahmeBeenden();
 			std::fflush(nullptr);
-			std::_Exit(0); // Speicherkarte wird beim Speichern sofort geschrieben
+			std::_Exit(0); // the memory card is written immediately when saving
 		case WM_PS2X_DESTROY:
 			DestroyWindow(hwnd);
 			return 0;
@@ -3159,8 +3720,8 @@ bool GSRunner::CreatePlatformWindow()
 {
 	pxAssertRel(!s_window, "Tried to create window when there already was one!");
 	if (const char* fs = std::getenv("PS2XGS_FULLSCREEN"); fs && *fs == '1')
-		ps2xin::fullscreen = true; // wird nach dem Anzeigen gesetzt
-	// Win32: Nachrichten muessen auf dem Thread laufen, der das Fenster erzeugt -> eigener UI-Thread
+		ps2xin::fullscreen = true; // set after showing
+	// Win32: messages must run on the thread that created the window -> own UI thread
 	s_win_thread = std::thread([] {
 		const wchar_t* cls = L"ps2xgs-window";
 		WNDCLASSEXW wc{};
@@ -3246,7 +3807,7 @@ std::optional<WindowInfo> GSRunner::GetPlatformWindowInfo()
 
 void GSRunner::PumpPlatformMessages(bool forever)
 {
-	// Die Nachrichten laufen im UI-Thread des Fensters; ohne Fenster (Testlauf) hier nur die Gamepads abfragen
+	// The messages run in the window's UI thread; without a window (test run) only poll the gamepads here
 	do
 	{
 		if (s_shutdown_requested.load())
@@ -3280,7 +3841,7 @@ bool GSRunner::CreatePlatformWindow()
 	int screen = DefaultScreen(s_display);
 	Window root = RootWindow(s_display, screen);
 
-	s_window = XCreateSimpleWindow(s_display, root, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 1,
+	s_window = XCreateSimpleWindow(s_display, root, 0, 0, ps2xFensterMass(false), ps2xFensterMass(true), 1,
 		BlackPixel(s_display, screen), WhitePixel(s_display, screen));
 
 	if (s_window == None)
@@ -3294,7 +3855,7 @@ bool GSRunner::CreatePlatformWindow()
 	XStoreName(s_display, s_window, ps2xmenu::envOr("PS2X_WINDOW_TITLE", "Shadow of the Colossus (SotC Recomp)"));
 	XSelectInput(s_display, s_window, StructureNotifyMask | KeyPressMask | KeyReleaseMask | FocusChangeMask |
 		ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
-	XkbSetDetectableAutoRepeat(s_display, True, nullptr); // gehaltene Tasten ohne Los-/Druck-Flackern
+	XkbSetDetectableAutoRepeat(s_display, True, nullptr); // held keys without release/press flicker
 	ps2xin::wmDelete = XInternAtom(s_display, "WM_DELETE_WINDOW", False);
 	XSetWMProtocols(s_display, s_window, &ps2xin::wmDelete, 1);
 	{
@@ -3302,9 +3863,9 @@ bool GSRunner::CreatePlatformWindow()
 		if (ch) { ch->res_name = const_cast<char*>(ps2xmenu::cfgName()); ch->res_class = const_cast<char*>(ps2xmenu::cfgName()); XSetClassHint(s_display, s_window, ch); XFree(ch); }
 	}
 	if (const char* fs = std::getenv("PS2XGS_FULLSCREEN"); fs && *fs == '1')
-		ps2xin::fullscreen = true; // wird nach dem Anzeigen gesetzt
+		ps2xin::fullscreen = true; // set after showing
 	{
-		// Ohne WM_HINTS input=True geben manche Fenstermanager (KWin unter XWayland) dem Fenster keinen Tastaturfokus
+		// Without WM_HINTS input=True some window managers (KWin under XWayland) do not give the window keyboard focus
 		if (XWMHints* wh = XAllocWMHints())
 		{
 			wh->flags = InputHint | StateHint;
@@ -3319,8 +3880,8 @@ bool GSRunner::CreatePlatformWindow()
 	s_wi.type = WindowInfo::Type::X11;
 	s_wi.display_connection = s_display;
 	s_wi.window_handle = reinterpret_cast<void*>(s_window);
-	s_wi.surface_width = WINDOW_WIDTH;
-	s_wi.surface_height = WINDOW_HEIGHT;
+	s_wi.surface_width = ps2xFensterMass(false);
+	s_wi.surface_height = ps2xFensterMass(true);
 	s_wi.surface_scale = 1.0f;
 
 	XFlush(s_display);
@@ -3382,7 +3943,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 					break;
 				case FocusIn:
 					if (std::getenv("PS2X_KEYLOG"))
-						std::fprintf(stderr, "[ps2x] Fokus erhalten\n");
+						std::fprintf(stderr, "[ps2x] focus gained\n");
 					break;
 				case KeyPress:
 				case KeyRelease:
@@ -3392,8 +3953,8 @@ void GSRunner::PumpPlatformMessages(bool forever)
 					if (down)
 					{
 						static int s_keys = 0;
-						if (s_keys++ == 0) Console.WriteLn("[ps2x] Tastatur aktiv");
-						if (std::getenv("PS2X_KEYLOG")) std::fprintf(stderr, "[ps2x] Taste %lx\n", static_cast<unsigned long>(ks));
+						if (s_keys++ == 0) Console.WriteLn("[ps2x] keyboard active");
+						if (std::getenv("PS2X_KEYLOG")) std::fprintf(stderr, "[ps2x] key %lx\n", static_cast<unsigned long>(ks));
 					}
 					ps2xKey(ks, down, (event.xkey.state & Mod1Mask) != 0);
 					break;
@@ -3403,14 +3964,14 @@ void GSRunner::PumpPlatformMessages(bool forever)
 					ps2xmenu::mouseY.store(event.xmotion.y);
 					if (ps2xin::mausGefangen.load())
 					{
-						// Relative Bewegung zur letzten Position. Nahe am Rand den Zeiger in die Mitte setzen; das dadurch
-						// ausgeloeste Ereignis (genau Mitte) zaehlt nicht. Klappt das Versetzen nicht (manche XWayland-
-						// Fassungen), bleibt die Bewegung trotzdem richtig, nur am Rand begrenzt.
+						// Relative movement to the last position. Near the edge move the pointer to the centre; the event caused by
+						// that (exactly the centre) does not count. If warping does not work (some XWayland
+						// versions), the movement is still right, only limited at the edge.
 						static int s_lx = -1, s_ly = -1, s_warp = 0;
 						const int w = static_cast<int>(s_wi.surface_width), h = static_cast<int>(s_wi.surface_height);
 						const int cx = w / 2, cy = h / 2, x = event.xmotion.x, y = event.xmotion.y;
 						if (s_warp > 0 && x == cx && y == cy) { s_warp = 0; s_lx = cx; s_ly = cy; break; }
-						if (s_warp > 0 && --s_warp == 0) { /* Versetzen kam nicht an */ }
+						if (s_warp > 0 && --s_warp == 0) { /* warp did not arrive */ }
 						if (s_lx >= 0 && ps2xin::mausNeu.exchange(false) == false)
 						{
 							ps2xin::mausDX.fetch_add(x - s_lx); ps2xin::mausDY.fetch_add(y - s_ly);
@@ -3441,7 +4002,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 							XGrabPointer(s_display, s_window, True, PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
 								GrabModeAsync, GrabModeAsync, s_window, None, CurrentTime) == GrabSuccess)
 						{
-							// Fangen: Zeiger aufs Fenster beschraenkt (unter XWayland: Zeiger-Sperre durch den Compositor)
+							// Capture: pointer confined to the window (under XWayland: pointer lock by the compositor)
 							ps2xin::mausNeu.store(true);
 							ps2xin::mausDX.store(0); ps2xin::mausDY.store(0);
 							ps2xin::mausAktivMs.store(ps2xin::jetztMs()); ps2xin::mausGefangen.store(true);
@@ -3456,7 +4017,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 				}
 				case FocusOut:
 					if (std::getenv("PS2X_KEYLOG"))
-						std::fprintf(stderr, "[ps2x] Fokus verloren\n");
+						std::fprintf(stderr, "[ps2x] focus lost\n");
 					if (ps2xin::mausGefangen.exchange(false)) XUngrabPointer(s_display, CurrentTime);
 					ps2xin::aktivA.store(0);
 					ps2xin::keyBtns.store(0);
@@ -3465,9 +4026,9 @@ void GSRunner::PumpPlatformMessages(bool forever)
 				case ClientMessage:
 					if (static_cast<Atom>(event.xclient.data.l[0]) == ps2xin::wmDelete)
 					{
-						Console.WriteLn("[ps2x] Fenster geschlossen -> Spiel beenden");
+						Console.WriteLn("[ps2x] window closed -> quitting the game");
 						std::fflush(nullptr);
-						std::_Exit(0); // Speicherkarte wird beim Speichern sofort geschrieben
+						std::_Exit(0); // the memory card is written immediately when saving
 					}
 					break;
 				default:
@@ -3480,7 +4041,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 
 		if (forever)
 		{
-			// Mauszeiger: im Spiel unsichtbar, im Menue (Maussteuerung) sichtbar
+			// Mouse pointer: invisible in the game, visible in the menu (mouse control)
 			static Cursor s_blank = None;
 			static int s_cursorAus = -1;
 			const int aus = ps2xmenu::open.load() ? 0 : 1;
@@ -3498,7 +4059,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 				XFlush(s_display);
 				s_cursorAus = aus;
 			}
-			if (ps2xin::mausGefangen.load() && !ps2xMausWill()) // Menue geoeffnet / Mauszielen aus -> freigeben
+			if (ps2xin::mausGefangen.load() && !ps2xMausWill()) // menu opened / mouse aiming off -> release
 			{
 				ps2xin::mausGefangen.store(false);
 				for (int i = 0; i < ps2xmenu::kAnzAktionen; ++i) ps2xin::impulse[i].store(0);
@@ -3521,10 +4082,10 @@ void GSRunner::StopPlatformMessagePump()
 
 
 //////////////////////////////////////////////////////////////////////////
-// ps2x API (einzige exportierte Symbole der Bibliothek)
+// ps2x API (the only exported symbols of the library)
 //////////////////////////////////////////////////////////////////////////
-// Haken im gepatchten PCSX2 (ImGuiOverlays.cpp, GSDumpReplayer.cpp). Auf Dateiebene deklariert: innerhalb der
-// extern-"C"-Exportfunktionen haetten sie C-Bindung, was unter Windows (MSVC-Namensschema) nicht zur Definition passt.
+// Hooks in the patched PCSX2 (ImGuiOverlays.cpp, GSDumpReplayer.cpp). Declared at file scope: inside the
+// extern "C" export functions they would get C linkage, which on Windows (MSVC name mangling) does not match the definition.
 extern void (*g_ps2xMenuDraw)();
 extern void (*g_ps2xCpuHook)();
 
@@ -3536,8 +4097,8 @@ extern void (*g_ps2xCpuHook)();
 
 static std::thread s_ps2x_cpu_thread;
 static std::thread s_ps2x_pump_thread;
-// Beim Entladen der DLL / Prozessende laufen die Threads noch: ein zerstoertes, noch "joinable" std::thread ruft
-// std::terminate (Windows: abort -> 0xC0000409 beim Beenden). Dieses Objekt wird vor den Threads zerstoert und loest sie.
+// When the DLL unloads / the process ends the threads are still running: a destroyed, still joinable std::thread calls
+// std::terminate (Windows: abort -> 0xC0000409 on exit). This object is destroyed before the threads and detaches them.
 static struct Ps2xThreadsLoesen
 {
 	~Ps2xThreadsLoesen()
@@ -3555,9 +4116,9 @@ static VMBootParameters s_ps2x_params;
 #ifdef _WIN32
 
 #include <crtdbg.h>
-// Windows-Diagnose: Bridge-Log in eine Datei (die Windows-Konsole von PCSX2 schreibt nicht in umgeleitete Ausgaben)
-// und eigene Absturzmeldung fuer Faelle, die CrashHandler (SEH) nicht sieht: abort()/std::terminate/ungueltige
-// CRT-Parameter enden sonst als 0xC0000409 ohne jede Spur.
+// Windows diagnosis: bridge log into a file (PCSX2's Windows console does not write to redirected output)
+// and an own crash message for cases the CrashHandler (SEH) does not see: abort()/std::terminate/invalid
+// CRT parameters otherwise end as 0xC0000409 without any trace.
 namespace ps2xdiag
 {
 	static std::string s_log;
@@ -3597,7 +4158,7 @@ namespace ps2xdiag
 	static LONG WINAPI beiAusnahme(EXCEPTION_POINTERS* e)
 	{
 		const DWORD c = e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionCode : 0;
-		// nur echte Fehler (keine Debug-/C++-Ausnahmen, die gefangen werden)
+		// only real errors (no debug/C++ exceptions that get caught)
 		if (c == 0xC0000005 || c == 0xC0000409 || c == 0xC000001D || c == 0xC00000FD || c == 0xC0000374 || c == 0xC0000094)
 		{
 			char b[160];
@@ -3640,8 +4201,8 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 #ifdef _WIN32
 	ps2xdiag::installieren();
 	// Prozessende: PCSX2 laesst eigene Threads laufen (z. B. Texturersatz-Lader); deren statische std::thread-Objekte
-	// wuerden beim Entladen der DLL std::terminate ausloesen (0xC0000409 beim Beenden). Dieser atexit-Eintrag der DLL
-	// laeuft vor allen frueher registrierten statischen Destruktoren und beendet den Prozess sofort.
+	// would trigger std::terminate when the DLL unloads (0xC0000409 on exit). This atexit entry of the DLL
+	// runs before all statically registered destructors registered earlier and ends the process right away.
 	std::atexit([] { std::fflush(nullptr); TerminateProcess(GetCurrentProcess(), 0); });
 #endif
 	CrashHandler::Install(); // Absturz-Aufrufstapel ins Log (libbacktrace)
@@ -3652,7 +4213,7 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 	PS2XDIAG("[ps2xgs] start: Konsole");
 	if (!GSRunner::InitializeConfig())
 	{
-		Console.Error("ps2xgs: Konfiguration fehlgeschlagen");
+		Console.Error("ps2xgs: configuration failed");
 		PS2XDIAG("[ps2xgs] start: Konfiguration fehlgeschlagen");
 		return 0;
 	}
@@ -3668,13 +4229,13 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 	PS2XDIAG("[ps2xgs] start: Menue-Einstellungen geladen");
 	if (!(surfaceless && *surfaceless && *surfaceless != '0') && !GSRunner::CreatePlatformWindow())
 	{
-		Console.Error("ps2xgs: Fenster fehlgeschlagen");
+		Console.Error("ps2xgs: creating the window failed");
 		PS2XDIAG("[ps2xgs] start: Fenster fehlgeschlagen");
 		return 0;
 	}
 	PS2XDIAG("[ps2xgs] start: Fenster ok");
 	GSRunner::SettingsOverride();
-	// Der Port taktet selbst (VBlank 50 Hz) -> kein eigener Limiter, kein VSync-Warten im GS (V-Sync optional im Menue)
+	// The port paces itself (VBlank 50 Hz) -> no limiter of its own, no VSync wait in the GS (V-Sync optional in the menu)
 	s_settings_interface.SetBoolValue("EmuCore/GS", "FrameLimitEnable", false);
 	s_settings_interface.SetIntValue("EmuCore/GS", "Renderer", renderer);
 	s_settings_interface.SetFloatValue("EmuCore/GS", "upscale_multiplier", upscale);
@@ -3682,9 +4243,9 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		s_settings_interface.SetStringValue("EmuCore/GS", "AspectRatio", "16:9");
 	s_settings_interface.SetBoolValue("EmuCore/GS", "OsdShowGSStats", false);
 	s_settings_interface.SetBoolValue("Logging", "EnableVerbose", false);
-	// SotC-Korrekturen aus PCSX2s GameIndex.yaml (SCES-53326). Ohne Disc-Start greift die Spieldatenbank nicht,
-	// daher hier fest: Wasserfarbe (Blending 4), Raender/Versatz (Half-Pixel 5), Nachbearbeitung/DOF (Native Scaling 3)
-	// Nur fuer SotC (andere Spiele per PS2XGS_SERIAL bekommen PCSX2-Standard bzw. eigene Werte)
+	// SotC fixes from PCSX2's GameIndex.yaml (SCES-53326). Without a disc boot the game database does not apply,
+	// so fixed here: water colour (blending 4), borders/offset (half-pixel 5), post-processing/DOF (native scaling 3)
+	// Only for SotC (other games get the PCSX2 defaults or their own values through PS2XGS_SERIAL)
 	if (const char* ser = std::getenv("PS2XGS_SERIAL"); !ser || !*ser || std::string_view(ser) == "SCES-53326")
 	{
 		s_settings_interface.SetBoolValue("EmuCore/GS", "UserHacks", true);
@@ -3715,13 +4276,13 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 			Console.WriteLn(fmt::format("[ps2xgs] GS-Option {} = {}", k, v));
 		}
 	}
-	// Spielmenue: gespeicherte Einstellungen uebernehmen (Testlaeufe ohne Fenster: unveraendert, wie bisher)
-	const bool cfgTest = std::getenv("PS2XGS_CFG") != nullptr; // Testlauf mit festen Menue-Einstellungen
+	// Game menu: take over saved settings (windowless test runs: unchanged, as before)
+	const bool cfgTest = std::getenv("PS2XGS_CFG") != nullptr; // test run with fixed menu settings
 	if (cfgTest)
 		s_settings_interface.SetIntValue("EmuCore/GS", "ScreenshotSize", 1); // Screenshot in interner Aufloesung
 	if (!(surfaceless && *surfaceless && *surfaceless != '0') || cfgTest)
 	{
-		// Ton: SPU2-Ausgabe ueber Cubeb (PulseAudio/PipeWire), 48 kHz, Zeitdehnung gegen Knacken
+		// Sound: SPU2 output through Cubeb (PulseAudio/PipeWire), 48 kHz, time stretching against crackling
 		if (!cfgTest)
 		{
 			s_settings_interface.SetStringValue("SPU2/Output", "Backend", "Cubeb");
@@ -3734,16 +4295,18 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		g_ps2xMenuDraw = &ps2xmenu::draw;
 		ps2xmenu::active.store(true);
 		g_ps2xCpuHook = &ps2xmenu::cpuHook;
-		// Startmenue: Einstellungen vor dem Spielen (abschaltbar im Menue)
+		// Start menu: settings before playing (can be turned off in the menu)
 		bool sm;
 		{ std::lock_guard<std::mutex> lk(ps2xmenu::m); sm = ps2xmenu::cfg.startMenu; }
-		if (sm && !cfgTest)
+		// started from the launcher: settings were made there, the menu stays closed (ESC/F1 opens it)
+		const bool vomLauncher = std::getenv("TS2_LAUNCHER") != nullptr;
+		if (sm && !cfgTest && !vomLauncher)
 			ps2xmenu::open.store(true);
 	}
-	s_settings_interface.SetBoolValue("EmuCore", "WarnAboutUnsafeSettings", false); // keine PCSX2-Warnhinweise im Bild
-	// Bildausgabe: SotC zeichnet volle Bilder, das PCRTC zeigt sie als Halbbilder (SMODE2 INT=1, FFMD=0). PCSX2s
-	// automatisches Deinterlacing (adaptiv) laesst bewegte Figuren auf dem Bildschirm zittern/"wobbeln", in Screenshots
-	// nicht sichtbar. Daher: Deinterlacing aus = das volle Bild direkt zeigen. PS2X_DEINTERLACE=<0..9> zum Testen.
+	s_settings_interface.SetBoolValue("EmuCore", "WarnAboutUnsafeSettings", false); // no PCSX2 warning messages in the picture
+	// Picture output: SotC draws full frames, the PCRTC shows them as fields (SMODE2 INT=1, FFMD=0). PCSX2's
+	// automatic deinterlacing (adaptive) makes moving characters jitter/"wobble" on screen, not visible in
+	// screenshots. So: deinterlacing off = show the full frame directly. PS2X_DEINTERLACE=<0..9> for testing.
 	{
 		int di = 1; // GSInterlaceMode::Off
 		if (const char* e = std::getenv("PS2X_DEINTERLACE"); e && *e) di = std::atoi(e);
@@ -3755,10 +4318,10 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		if (const char* t = std::getenv("PS2XGS_TEXDIR"); t && *t) tex = t;
 		else tex = ps2xmenu::dir() + "/texturen";
 		s_settings_interface.SetStringValue("Folders", "Textures", tex.c_str());
-		EmuFolders::Textures = tex; // wurde schon beim Start aus der PCSX2-Konfiguration gesetzt
-		{ const unsigned n = ps2xmenu::assembleTextures(); if (n) Console.WriteLn("[ps2x] Texturen: %u Ersatzdateien aktiv (HD-Text/Pakete)", n); }
+		EmuFolders::Textures = tex; // already set at start from the PCSX2 configuration
+		{ const unsigned n = ps2xmenu::assembleTextures(); if (n) Console.WriteLn("[ps2x] textures: %u replacement files active (HD text/packs)", n); }
 		s_settings_interface.SetBoolValue("EmuCore/GS", "LoadTextureReplacements", true);
-		s_settings_interface.SetBoolValue("EmuCore/GS", "LoadTextureReplacementsAsync", true); // nie im Grafik-Thread laden (Ruckler); Aufploppen verhindert das Vorladen beim Start
+		s_settings_interface.SetBoolValue("EmuCore/GS", "LoadTextureReplacementsAsync", true); // never load on the graphics thread (stutter); preloading at start prevents pop-in
 		s_settings_interface.SetBoolValue("EmuCore/GS", "PrecacheTextureReplacements", true);
 		const char* dump = std::getenv("PS2XGS_TEXDUMP");
 		const bool d = dump && *dump == '1';
@@ -3767,15 +4330,15 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpDirectTextures", true);
 		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpPaletteTextures", true);
 		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpTexturesWithFMVActive", false);
-		Console.WriteLn(fmt::format("[ps2xgs] HD-Texturen: {}{}", tex, d ? " (Auslesen aktiv)" : ""));
+		Console.WriteLn(fmt::format("[ps2xgs] HD textures: {}{}", tex, d ? " (Auslesen aktiv)" : ""));
 	}
 
-	s_ps2x_params.filename = live_path; // endet auf ps2x_live.gs -> GSDumpReplayer Live-Modus
+	s_ps2x_params.filename = live_path; // ends in ps2x_live.gs -> GSDumpReplayer live mode
 	s_ps2x_cpu_thread = std::thread(CPUThreadMain, &s_ps2x_params, &s_ps2x_ret);
 	PS2XDIAG("[ps2xgs] start: CPU-Thread gestartet");
 	s_ps2x_pump_thread = std::thread([] { GSRunner::PumpPlatformMessages(true); });
-	// Warten, bis die VM (inkl. SPU2) bereit ist: der Port schreibt danach sofort SPU2-Register (Sound-Treiber-Start)
-	// bis zu 30 s: Vulkan legt beim ersten Start auf manchen Treibern erst Pipeline-/Shader-Caches an
+	// Wait until the VM (incl. SPU2) is ready: the port writes SPU2 registers right afterwards (sound driver start)
+	// up to 30 s: on some drivers Vulkan first builds pipeline/shader caches on the first start
 	int ms = 0;
 	for (; ms < 30000 && !VMManager::HasValidVM(); ms += 10)
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -3786,8 +4349,8 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 	}
 	else
 		PS2XDIAG("[ps2xgs] start: VM nach 30 s nicht bereit");
-	// PS2XGS_VM_PFLICHT=1 (Windows-Launcher): ohne gueltige VM (z. B. Grafikgeraet liess sich nicht anlegen) Fehlschlag
-	// melden, damit der Launcher mit einem anderen Renderer neu starten kann, statt ein schwarzes Fenster zu zeigen
+	// PS2XGS_VM_PFLICHT=1 (Windows launcher): without a valid VM (e.g. the graphics device could not be created) report
+	// failure so that the launcher can restart with another renderer instead of showing a black window
 	if (const char* e = std::getenv("PS2XGS_VM_PFLICHT"); e && *e == '1' && !VMManager::HasValidVM())
 		return 0;
 	return 1;
@@ -3798,20 +4361,20 @@ PS2XGS_API void ps2xgs_transfer(int path, const unsigned char* data, unsigned in
 	GSDumpReplayer::LivePush(0, static_cast<u8>(path), data, size);
 }
 
-// Gesammelte Grafikpakete des aufrufenden Threads abgeben (Port: nach jedem VU1-Auftrag und vor jeder Uebergabe)
+// Hand over the calling thread's collected graphics packets (port: after every VU1 job and before every handover)
 PS2XGS_API void ps2xgs_flush()
 {
 	GSDumpReplayer::LiveFlush();
 }
 
-// GS-Download fuer VIF1-DMA Richtung Speicher (Spiele lesen VRAM zurueck, z. B. TimeSplitters 2):
-// offene Pakete abgeben, dann wie PCSX2 den VIF1-FIFO aus dem GS lesen (BITBLTBUF/TRXPOS/TRXREG aus dem GS-Zustand)
+// GS download for VIF1 DMA towards memory (games read VRAM back, e.g. TimeSplitters 2):
+// hand over open packets, then read the VIF1 FIFO from the GS as PCSX2 does (BITBLTBUF/TRXPOS/TRXREG from the GS state)
 PS2XGS_API void ps2xgs_read_fifo(unsigned char* mem, unsigned int qwc)
 {
-	GSDumpReplayer::LiveReadFifo(mem, qwc);   // auf dem CPU-Thread in Paketreihenfolge, wartet auf Fertig
+	GSDumpReplayer::LiveReadFifo(mem, qwc);   // on the CPU thread in packet order, waits for completion
 }
 
-// ps2x: GS-Download ohne den EE anzuhalten (TS2 liest jedes Menuebild zurueck; Ergebnis wird erst beim VBlank gebraucht)
+// ps2x: GS download without stopping the EE (TS2 reads back every menu frame; the result is only needed at the VBlank)
 PS2XGS_API void* ps2xgs_read_fifo_async(unsigned char* mem, unsigned int qwc)
 {
 	return GSDumpReplayer::LiveReadFifoAsync(mem, qwc);
@@ -3824,17 +4387,17 @@ PS2XGS_API void ps2xgs_read_fifo_wait(void* ticket)
 
 PS2XGS_API void ps2xgs_vsync(const unsigned char* regs0x2000, int field)
 {
-	// Vorladen der Ersatztexturen (Texturpakete): beim Start einmal warten, bis der Lade-Thread fertig ist, statt
-	// die ersten Minuten im Menue nachzuladen (das ruckelte). Hoechstens 45 s; PS2XGS_TEX_WARTEN=0 schaltet es ab.
+	// Preloading the replacement textures (texture packs): wait once at start until the loader thread is done instead of
+	// loading during the first minutes in the menu (that stuttered). At most 45 s; PS2XGS_TEX_WARTEN=0 turns it off.
 	static unsigned s_vsyncs = 0;
-	// PCSX2-Hinweise, die fuer den Port nicht gelten (keine PCSX2-Patchdatenbank, Eingaben laufen ueber den Port
-	// selbst), in den ersten Sekunden wieder entfernen, statt sie als Einblendung oben links zu zeigen
+	// Remove PCSX2 notices that do not apply to the port (no PCSX2 patch database, input runs through the port
+	// itself) again in the first seconds instead of showing them as an overlay top left
 	if (s_vsyncs < 600 && (s_vsyncs % 15u) == 0u)
 	{
 		Host::RemoveKeyedOSDMessage("PatchesZipOpenWarning");
 		Host::RemoveKeyedOSDMessage("ControllerNotConfigured");
 	}
-	if (++s_vsyncs == 120) // nach den ersten Bildern (interne Aufloesung bekannt)
+	if (++s_vsyncs == 120) // after the first frames (internal resolution known)
 	{
 		if (const char* c = std::getenv("PS2XGS_CAPTURE"); c && *c) ps2xhot::aufnahmeStart(c);
 	}
@@ -3846,7 +4409,7 @@ PS2XGS_API void ps2xgs_vsync(const unsigned char* regs0x2000, int field)
 		{
 			const auto t0 = std::chrono::steady_clock::now();
 			const bool ok = GSTextureReplacements::WaitForWorkerIdle(45000);
-			Console.WriteLn("[ps2x] Texturen vorgeladen: %u Dateien in %.1f s%s", pending,
+			Console.WriteLn("[ps2x] textures preloaded: %u files in %.1f s%s", pending,
 				std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), ok ? "" : " (Zeitlimit)");
 		}
 	}
@@ -3868,13 +4431,13 @@ PS2XGS_API void ps2xgs_screenshot(const char* path)
 	MTGS::RunOnGSThread([p]() { GSQueueSnapshot(p); });
 }
 
-// Eingabe fuer den Port: gedrueckte PS2-Tasten (1 = gedrueckt) und Sticks (lx, ly, rx, ry; 0x80 = Mitte).
-// Gamepad und Tastatur (im Spielfenster) werden zusammengefuehrt. Rueckgabe 1, wenn ein Fenster/Gamepad da ist.
+// Input for the port: pressed PS2 buttons (1 = pressed) and sticks (lx, ly, rx, ry; 0x80 = centre).
+// Gamepad and keyboard (in the game window) are merged. Returns 1 if a window/gamepad is present.
 PS2XGS_API int ps2xgs_pad(unsigned short* pressed, unsigned char* axes4)
 {
 	u32 b = ps2xin::keyBtns.load() | ps2xin::padBtns.load();
 	{
-		// Mausrad-Impulse: je Raste ~6 Abfragen lang die Aktion druecken, dann kurz loslassen
+		// Mouse wheel impulses: press the action for ~6 queries per notch, then release briefly
 		static int s_halten = 0, s_akt = -1;
 		if (s_halten > 0) { --s_halten; if (s_halten == 0) s_halten = -4; }
 		else if (s_halten < 0) ++s_halten;
@@ -3882,16 +4445,20 @@ PS2XGS_API int ps2xgs_pad(unsigned short* pressed, unsigned char* axes4)
 			for (int i = 0; i < ps2xmenu::kAnzAktionen; ++i)
 				if (ps2xin::impulse[i].load() > 0) { ps2xin::impulse[i].fetch_sub(1); s_akt = i; s_halten = 6; break; }
 		if (s_halten > 0 && s_akt >= 0 && ps2xmenu::kAktionen[s_akt].wirkung == ps2xmenu::W_TASTE) b |= ps2xmenu::kAktionen[s_akt].wert;
-		// Zoom (halten): Steuerkreuz hoch, solange gehalten; beim Loslassen genauso lange runter (zurueck auf normal)
+		// Zoom (hold): D-pad up while held; on release down for the same time (back to normal)
 		static int s_zoom = 0, s_zurueck = 0;
 		if (ps2xin::zoomGehalten()) { b |= ps2xin::UP; if (s_zoom < 240) ++s_zoom; s_zurueck = 0; }
 		else if (s_zoom > 0) { s_zurueck = s_zoom; s_zoom = 0; }
 		if (s_zurueck > 0) { b |= ps2xin::DOWN; --s_zurueck; }
+		// Aim mode (L2) only while zooming (like sights/ADS in PC shooters): otherwise full walking speed
+		const bool za = s_zoom > 0 || s_zurueck > 0;
+		ps2xosd::zoomAktiv.store(za);
+		if (za) b |= ps2xin::L2;
 	}
 	u32 ax = ps2xin::padAxes.load();
 	if (ps2xmenu::open.load() || ps2xmenu::latch.load())
 	{
-		// Menue offen bzw. gerade geschlossen: Spiel bekommt nichts, bis alles losgelassen ist
+		// Menu open or just closed: the game gets nothing until everything is released
 		if (!ps2xmenu::open.load() && b == 0 && (ps2xin::keyStick.load() == 0))
 			ps2xmenu::latch.store(false);
 		if (pressed) *pressed = 0;
@@ -3902,12 +4469,13 @@ PS2XGS_API int ps2xgs_pad(unsigned short* pressed, unsigned char* axes4)
 	const u32 ks = ps2xin::keyStick.load();
 	if (ks & 1) a[1] = 0x00; if (ks & 2) a[1] = 0xFF; if (ks & 4) a[0] = 0x00; if (ks & 8) a[0] = 0xFF;
 	if (ks & 16) a[3] = 0x00; if (ks & 32) a[3] = 0xFF; if (ks & 64) a[2] = 0x00; if (ks & 128) a[2] = 0xFF;
+	ps2xosd::btns.store(b);
+	if (ps2xmenu::onlinePlus() && ps2xfeed::imMatch()) b &= ~static_cast<u32>(ps2xin::SELECT);   // Online+: Select = own scoreboard, not the game's
 	if (pressed) *pressed = static_cast<unsigned short>(b);
-	if (axes4) std::memcpy(axes4, a, 4);
-	ps2xosd::btns.store(b); ps2xosd::axes.store(static_cast<u32>(a[0]) | (static_cast<u32>(a[1]) << 8) | (static_cast<u32>(a[2]) << 16) | (static_cast<u32>(a[3]) << 24));
+	if (axes4) std::memcpy(axes4, a, 4); ps2xosd::axes.store(static_cast<u32>(a[0]) | (static_cast<u32>(a[1]) << 8) | (static_cast<u32>(a[2]) << 16) | (static_cast<u32>(a[3]) << 24));
 	ps2xosd::keyBtns.store(ps2xin::keyBtns.load());
 	{
-		// Eingabe-Protokoll (letzter_start.log): bei Aenderung, max. ~10/s -> Diagnose Laufen/Stick
+		// Input log (letzter_start.log): on change, at most ~10/s -> diagnosing walking/stick
 		static u32 s_last = 0xFFFFFFFFu, s_lastAx = 0;
 		static auto s_t = std::chrono::steady_clock::now();
 		const u32 axq = (a[0] >> 4) | ((a[1] >> 4) << 4) | ((a[2] >> 4) << 8) | ((a[3] >> 4) << 12);
@@ -3922,8 +4490,8 @@ PS2XGS_API int ps2xgs_pad(unsigned short* pressed, unsigned char* axes4)
 	return (s_display != nullptr || ps2xin::padOn.load()) ? 1 : 0;
 }
 
-// Breitbild: 0 = Spiel entscheidet, 1 = 16:9 erzwingen, 2 = 4:3 erzwingen
-// ps2x: Eingabe je Spieler (0 = wie ps2xgs_pad, 1..3 = weitere Gamepads). Rueckgabe 1 = Gamepad vorhanden.
+// Widescreen: 0 = the game decides, 1 = force 16:9, 2 = force 4:3
+// ps2x: input per player (0 = as ps2xgs_pad, 1..3 = further gamepads). Returns 1 = gamepad present.
 PS2XGS_API int ps2xgs_pad_n(int player, unsigned short* pressed, unsigned char* axes4)
 {
 	if (player <= 0)
@@ -3944,13 +4512,13 @@ PS2XGS_API int ps2xgs_wide_mode()
 	{ std::lock_guard<std::mutex> lk(ps2xmenu::m); a = ps2xmenu::cfg.aspect; }
 	return a == 0 ? 1 : a == 2 ? 2 : 0;
 }
-// Das Spiel meldet seinen Bildmodus -> Ausgabe-Seitenverhaeltnis passend umschalten
+// The game reports its video mode -> switch the output aspect ratio to match
 PS2XGS_API void ps2xgs_game_wide(int wide)
 {
 	if (ps2xmenu::gameWide.exchange(wide != 0) != (wide != 0))
 		ps2xmenu::applyPending.store(true);
 }
-// ---- Ton: SPU2-Chip aus PCSX2, angesteuert vom IOP des Ports (Register, DMA, Takt, Interrupts) ----
+// ---- Sound: SPU2 chip from PCSX2, driven by the port's IOP (registers, DMA, clock, interrupts) ----
 extern void (*g_ps2xSpuIrqHook)(int); // IopIrq.cpp (globaler Namensraum!)
 namespace ps2xspu
 {
@@ -3975,7 +4543,7 @@ PS2XGS_API void ps2xspu_write(unsigned int addr, unsigned short value, unsigned 
 	psxRegs.cycle = cycle;
 	SPU2write(addr, value);
 	{
-		// PS2X_SPULOG: Aktivitaet des Sound-Treibers (Registerschreibungen, Key-On) alle 5 s
+		// PS2X_SPULOG: activity of the sound driver (register writes, key-on) every 5 s
 		static const bool log = std::getenv("PS2X_SPULOG") != nullptr;
 		if (log)
 		{
@@ -4053,10 +4621,10 @@ PS2XGS_API void ps2xspu_dma(int core, unsigned short* mem, unsigned int halfword
 	if (toSpu)
 	{
 		if (core == 0) SPU2writeDMA4Mem(mem, halfwords); else SPU2writeDMA7Mem(mem, halfwords);
-		// Normale (nicht-Auto-)DMA sofort vollstaendig in den SPU2-Speicher kopieren. PCSX2 kopiert sonst in 0x100-Wort-
-		// Stuecken ueber die Transferzeit und liest dabei weiter aus dem IOP-Speicher. Der Port meldet die DMA dem Spiel
-		// sofort als fertig (IOP-Zeit laeuft bei RPC-Bursts kaum); das Spiel ueberschreibt den Puffer dann sofort mit dem
-		// naechsten Soundbank-Teil. Der Abschluss (IRQA-Pruefung, DMA-IRQ) laeuft beim naechsten SPU2-Takt wie gewohnt.
+		// Copy normal (non-auto) DMA into SPU2 memory completely and at once. PCSX2 otherwise copies in 0x100-word
+		// pieces over the transfer time while still reading from IOP memory. The port reports the DMA to the game
+		// as done right away (IOP time hardly advances during RPC bursts); the game then immediately overwrites the buffer with the
+		// next sound bank part. Completion (IRQA check, DMA IRQ) happens at the next SPU2 tick as usual.
 		V_Core& k = Cores[core];
 		if (!k.AdmaInProgress)
 		{
@@ -4085,9 +4653,169 @@ PS2XGS_API unsigned int ps2xspu_take_irqs()
 	return ps2xspu::irqs.exchange(0);
 }
 
-// Spiel-Optionen fuer den Port (id 0 = Kamera-Unschaerfe, 1 = TS2-Nachzieheffekt). Ohne aktives Menue (Testlaeufe): fallback.
+// Game options for the port (id 0 = camera blur, 1 = TS2 motion trail). Without an active menu (test runs): fallback.
+// Online+ hit/kill sounds: short synthesized clicks on an own SDL audio stream (independent of the SPU2 output)
+namespace ps2xklang
+{
+	std::mutex m; SDL_AudioStream* st = nullptr; bool versucht = false;
+	void spiele(bool kill)
+	{
+		int vol; bool an; { std::lock_guard<std::mutex> lk(ps2xmenu::m); an = ps2xmenu::cfg.impact != 0 && ps2xmenu::cfg.impactSound != 0; vol = ps2xmenu::cfg.volume; }
+		static const bool env = [] { const char* e = std::getenv("TS2_IMPACT"); return e && *e == '1'; }();
+		if ((!an && !env) || !ps2xmenu::onlinePlus()) return;
+		std::lock_guard<std::mutex> lk(m);
+		if (!st && !versucht)
+		{
+			versucht = true;
+			if (SDL_InitSubSystem(SDL_INIT_AUDIO))
+			{
+				const SDL_AudioSpec sp{SDL_AUDIO_F32, 1, 48000};
+				st = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &sp, nullptr, nullptr);
+				if (st) SDL_ResumeAudioStreamDevice(st);
+			}
+		}
+		if (!st) return;
+		// hit: bright 2.6 kHz tick (35 ms); kill: tick + low thump (120 ms)
+		const int n = kill ? 5760 : 1680; std::vector<float> b(n);
+		const float g = 0.35f * std::clamp(vol, 0, 200) / 100.0f;
+		for (int i = 0; i < n; ++i)
+		{
+			const float t = i / 48000.0f;
+			float v = std::sin(6.2831853f * 2600.0f * t) * std::exp(-t * 140.0f);
+			if (kill) v = 0.6f * v + std::sin(6.2831853f * (140.0f - 260.0f * t) * t) * std::exp(-t * 22.0f) + 0.4f * std::sin(6.2831853f * 1800.0f * t) * std::exp(-(t - 0.04f) * (t - 0.04f) * 9000.0f);
+			b[i] = std::clamp(v * g, -1.0f, 1.0f);
+		}
+		SDL_PutAudioStreamData(st, b.data(), static_cast<int>(b.size() * sizeof(float)));
+	}
+}
+namespace ps2xklang
+{
+	// announcer sting: rising square-ish arpeggio, more notes for bigger streaks
+	void fanfare(int stufe)
+	{
+		int vol; bool an; { std::lock_guard<std::mutex> lk(ps2xmenu::m); an = ps2xmenu::cfg.impact != 0 && ps2xmenu::cfg.impactSound != 0; vol = ps2xmenu::cfg.volume; }
+		static const bool env = [] { const char* e = std::getenv("TS2_IMPACT"); return e && *e == '1'; }();
+		if ((!an && !env) || !ps2xmenu::onlinePlus()) return;
+		std::lock_guard<std::mutex> lk(m);
+		if (!st && !versucht)
+		{
+			versucht = true;
+			if (SDL_InitSubSystem(SDL_INIT_AUDIO))
+			{
+				const SDL_AudioSpec sp{SDL_AUDIO_F32, 1, 48000};
+				st = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &sp, nullptr, nullptr);
+				if (st) SDL_ResumeAudioStreamDevice(st);
+			}
+		}
+		if (!st) return;
+		static const float noten[] = {523.25f, 659.25f, 783.99f, 1046.5f, 1318.5f};
+		const int nN = std::clamp(stufe + 1, 2, 5); const int lang = 3600; // 75 ms per note
+		std::vector<float> b(static_cast<size_t>(nN * lang + 9600), 0.0f);
+		const float g = 0.22f * std::clamp(vol, 0, 200) / 100.0f;
+		for (int k = 0; k < nN; ++k)
+		{
+			const int dauer = (k == nN - 1) ? lang + 9600 : lang;
+			for (int i = 0; i < dauer; ++i)
+			{
+				const float t = i / 48000.0f; const float ph = noten[k] * t;
+				float v = (ph - std::floor(ph) < 0.5f ? 1.0f : -1.0f) * 0.45f + std::sin(6.2831853f * ph) * 0.55f;
+				v *= std::min(1.0f, t * 400.0f) * std::exp(-t * (k == nN - 1 ? 6.0f : 18.0f));
+				b[static_cast<size_t>(k * lang + i)] += std::clamp(v * g, -1.0f, 1.0f);
+			}
+		}
+		SDL_PutAudioStreamData(st, b.data(), static_cast<int>(b.size() * sizeof(float)));
+	}
+}
+namespace ps2xstats
+{
+	std::mutex m; bool geladen = false; long long s_xp = 0; int s_kills = 0, s_hits = 0;
+	std::string pfad() { return ps2xmenu::dir() + "/stats.ini"; }
+	void laden()
+	{
+		if (geladen) return; geladen = true;
+		std::ifstream f(pfad()); std::string l;
+		while (std::getline(f, l)) { const size_t e = l.find('='); if (e == std::string::npos) continue; const std::string k = l.substr(0, e); const long long v = std::atoll(l.c_str() + e + 1);
+			if (k == "xp") s_xp = v; else if (k == "kills") s_kills = static_cast<int>(v); else if (k == "hits") s_hits = static_cast<int>(v); }
+	}
+	void speichern() { std::ofstream f(pfad()); f << "xp=" << s_xp << "\nkills=" << s_kills << "\nhits=" << s_hits << "\n"; }
+	long long xpFuer(int lvl) { return 250LL * lvl * (lvl - 1); }   // XP needed to reach a level: 0, 500, 1500, 3000, ...
+	int levelVon(long long x) { int l = 1; while (l < 50 && xpFuer(l + 1) <= x) ++l; return l; }
+	int level() { std::lock_guard<std::mutex> lk(m); laden(); return levelVon(s_xp); }
+	long long xp() { std::lock_guard<std::mutex> lk(m); laden(); return s_xp; }
+	int kills() { std::lock_guard<std::mutex> lk(m); laden(); return s_kills; }
+	int hits() { std::lock_guard<std::mutex> lk(m); laden(); return s_hits; }
+	void dazu(long long n, bool istKill)
+	{
+		int vor, nach;
+		{ std::lock_guard<std::mutex> lk(m); laden(); vor = levelVon(s_xp); s_xp += n; if (istKill) ++s_kills; else ++s_hits; nach = levelVon(s_xp); if (istKill || s_hits % 10 == 0) speichern(); }
+		if (nach > vor) ps2xhot::toast(fmt::format("LEVEL UP  {}  -  {}", nach, ps2xRang(nach)));
+	}
+	void treffer() { dazu(10, false); }
+	// server copy of the Online+ profile (same player on another computer, or local data lost): keep the higher values
+	void abgleich(long long xpS, long long kS, long long hS)
+	{
+		int vor, nach;
+		{ std::lock_guard<std::mutex> lk(m); laden(); vor = levelVon(s_xp); bool neu = false;
+		  if (xpS > s_xp) { s_xp = xpS; neu = true; } if (kS > s_kills) { s_kills = static_cast<int>(kS); neu = true; } if (hS > s_hits) { s_hits = static_cast<int>(hS); neu = true; }
+		  nach = levelVon(s_xp); if (neu) speichern(); }
+		if (nach > vor) ps2xhot::toast(fmt::format("LEVEL {}  -  {}", nach, ps2xRang(nach)));
+	}
+	void bonus(long long n)
+	{
+		int vor, nach;
+		{ std::lock_guard<std::mutex> lk(m); laden(); vor = levelVon(s_xp); s_xp += n; nach = levelVon(s_xp); speichern(); }
+		if (nach > vor) ps2xhot::toast(fmt::format("LEVEL UP  {}  -  {}", nach, ps2xRang(nach)));
+	}
+	void kill() { dazu(100, true); }
+}
 PS2XGS_API int ps2xgs_option(int id, int fallback)
 {
+	if (id == 9) { ps2xosd::ego.store(fallback != 0); return fallback; } // Message from the game: first-person view with the mouse active
+	if (id == 10) return ps2xosd::zoomAktiv.load() ? 1 : 0;
+	if (id == 19) { static const bool lg = std::getenv("TS2_IMPACT_LOG") != nullptr; if (lg) std::fprintf(stderr, "[Online+] damage %d\n", fallback); ps2xosd::schadenStaerke.store(std::clamp(fallback, 1, 100)); ps2xosd::schadenMs.store(ps2xosd::jetztMs()); return fallback; } // player took damage
+	if (id == 20) { if (ps2xosd::todN.exchange(fallback) != fallback) { std::lock_guard<std::mutex> lk(ps2xosd::am); ps2xosd::serie = 0; ps2xosd::kette = 0; } return fallback; } // player died
+	if (id == 28)   // Online+ in-game server browser: refresh the list (0 = ready, 1 = still searching)
+	{
+		if (fallback == 1 && !ps2xmenu::online::laeuft.load()) { ps2xmenu::Cfg c0; { std::lock_guard<std::mutex> lk(ps2xmenu::m); c0 = ps2xmenu::cfg; } ps2xmenu::online::aktualisieren(c0.onlineFavs, c0.onlineServer); }
+		return ps2xmenu::online::laeuft.load() ? 1 : 0;
+	}
+	if (id == 24) return ps2xstats::level();   // Online+ lobby: profile values for the in-game panel
+	if (id == 25) return static_cast<int>(std::min<long long>(ps2xstats::xp(), 2000000000LL));
+	if (id == 26) return ps2xstats::kills();
+	if (id == 27) { const int lv = ps2xstats::level(); return lv >= 50 ? static_cast<int>(std::min<long long>(ps2xstats::xp(), 2000000000LL)) : static_cast<int>(ps2xstats::xpFuer(lv + 1)); }
+	if (id == 23) { std::lock_guard<std::mutex> lk(ps2xmenu::m); return ps2xmenu::onlinePlus() ? ps2xmenu::cfg.impactAnsage : 0; } // announcer through the game's messages
+	if (id == 22) return ps2xmenu::onlinePlus() ? 1 : fallback; // Online+ edition: killfeed / scoreboard tracking on
+	if (id == 17) return 0; // main menu item "Online+": the game opens its own network menu now (no overlay window)
+	if (id == 18) { const int c = ps2xmenu::botAnfrage.exchange(0); return c ? c : fallback; } // quick bot match
+	if (id == 13 || id == 14) // Online+ events from the game: new hit / kill counter value
+	{
+		auto& n = id == 13 ? ps2xosd::trefferN : ps2xosd::killN;
+		if (n.exchange(fallback) != fallback)
+		{
+			(id == 13 ? ps2xosd::trefferMs : ps2xosd::killMs).store(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+			if (id == 13) ps2xstats::treffer(); else ps2xstats::kill();
+			ps2xklang::spiele(id == 14);
+			if (id == 14)
+			{
+				// multi-kill: kills within 4 s chain up; streak: kills without dying
+				const long long jetzt = ps2xosd::jetztMs();
+				std::string txt; int stufe = 0; long long bonusXp = 0;
+				{
+					std::lock_guard<std::mutex> lk(ps2xosd::am);
+					ps2xosd::kette = (jetzt - ps2xosd::letzterKillMs <= 4000) ? ps2xosd::kette + 1 : 1;
+					ps2xosd::letzterKillMs = jetzt; ++ps2xosd::serie;
+					static const char* kKette[] = {"", "", "DOUBLE KILL", "TRIPLE KILL", "MULTI KILL", "MEGA KILL", "MONSTER KILL"};
+					static const char* kSerie[] = {"KILLING SPREE", "RAMPAGE", "UNSTOPPABLE", "GODLIKE"};
+					if (ps2xosd::kette >= 2) { txt = kKette[std::min(ps2xosd::kette, 6)]; stufe = std::min(ps2xosd::kette - 1, 5); bonusXp = 50LL * (ps2xosd::kette - 1); }
+					if (ps2xosd::serie >= 5 && ps2xosd::serie % 5 == 0) { const int i = std::min(ps2xosd::serie / 5 - 1, 3); if (txt.empty() || i + 2 > stufe) { txt = kSerie[i]; stufe = i + 2; } bonusXp += 100LL * (i + 1); }
+					if (!txt.empty()) { ps2xosd::ansText = txt; ps2xosd::ansMs = jetzt; ps2xosd::ansStufe = stufe; }
+				}
+				if (bonusXp > 0) ps2xstats::bonus(bonusXp);
+				if (!txt.empty()) { std::fprintf(stderr, "[Online+] announcer: %s (+%lld XP)\n", txt.c_str(), bonusXp); ps2xklang::fanfare(stufe); }
+			}
+		}
+		return fallback;
+	}
 	if (!ps2xmenu::active.load())
 		return fallback;
 	std::lock_guard<std::mutex> lk(ps2xmenu::m);
@@ -4102,10 +4830,15 @@ PS2XGS_API int ps2xgs_option(int id, int fallback)
 		case 6: return ps2xmenu::cfg.zoomSens;
 		case 7: return ps2xin::zoomGehalten() ? 1 : 0;
 		case 8: return ps2xhot::freecam.load() ? 1 : 0;
+		case 11: return ps2xmenu::cfg.nickMax;
+		case 12: return ps2xmenu::cfg.scope;
+		case 15: return ps2xmenu::onlinePlus() ? ps2xmenu::cfg.impact : 0;
+		case 16: return ps2xmenu::cfg.impactKick;
+		case 21: return ps2xmenu::onlinePlus() ? ps2xmenu::cfg.impactRecoil : 0;
 		default: return fallback;
 	}
 }
-// Mauszielen: gesammelte relative Bewegung abholen. 0 = Maus nicht gefangen (Menue, kein Fokus, aus).
+// Mouse aiming: fetch the collected relative movement. 0 = mouse not captured (menu, no focus, off).
 PS2XGS_API int ps2xgs_mouse(int* dx, int* dy)
 {
 	const int x = ps2xin::mausDX.exchange(0), y = ps2xin::mausDY.exchange(0);
@@ -4118,23 +4851,73 @@ PS2XGS_API int ps2xgs_mouse(int* dx, int* dy)
 	if (dx) *dx = x; if (dy) *dy = y;
 	return 1;
 }
-// Online (TS2): Spiel hat die Netzwerk-Konfiguration erreicht -> Serverbrowser oeffnen
+// Online (TS2): the game reached the network configuration -> open the server browser
 PS2XGS_API void ps2xgs_online_browser()
 {
+	if (ps2xmenu::onlinePlus()) return;   // Online+: the server browser is a screen inside the game, no overlay window
 	ps2xmenu::online::oeffnen.store(true);
 }
-// Online (TS2): Verbindungsstatus der Spiel-Seite fuer den Serverbrowser
+// Text from the bridge for the game side (Online+ in-game screens): returns the length (0 = nothing)
+//   1 = server list "address\tname\tplayers\tmax\tping\tpassword\n" (answering servers, best first), 2 = chosen server
+PS2XGS_API int ps2xgs_text_get(int id, char* buf, int len)
+{
+	if (!buf || len <= 0) return 0;
+	std::string t;
+	if (id == 1)
+	{
+		std::lock_guard<std::mutex> lk(ps2xmenu::online::om);
+		std::vector<ps2xmenu::online::Eintrag> v = ps2xmenu::online::liste;
+		std::stable_sort(v.begin(), v.end(), [](const auto& a, const auto& b) { if (a.antwort != b.antwort) return a.antwort; if (a.spieler != b.spieler) return a.spieler > b.spieler; return a.ping < b.ping; });
+		for (const auto& e : v)
+		{
+			if (!e.antwort) continue;
+			std::string n = e.name.empty() ? e.adresse : e.name; for (char& ch : n) if (ch == '\t' || ch == '\n') ch = ' ';
+			t += e.adresse + "\t" + n.substr(0, 28) + "\t" + std::to_string(std::max(0, e.spieler)) + "\t" + std::to_string(e.max) + "\t" + std::to_string(std::max(0, e.ping)) + "\t" + (e.pw ? "1" : "0") + "\n";
+		}
+	}
+	else if (id == 2) { std::lock_guard<std::mutex> lk(ps2xmenu::m); t = ps2xmenu::cfg.onlineServer; }
+	const int n = static_cast<int>(std::min<size_t>(t.size(), static_cast<size_t>(len - 1)));
+	std::memcpy(buf, t.data(), static_cast<size_t>(n)); buf[n] = 0;
+	return n;
+}
+// Online (TS2): connection status of the game side for the server browser
+// Text events from the game side: 1 = killfeed line "killer\tvictim\tflags", 2 = scoreboard "name\tkills\tdeaths\tyou\n..."
+PS2XGS_API void ps2xgs_text(int id, const char* text)
+{
+	if (!text) return;
+	std::lock_guard<std::mutex> lk(ps2xfeed::m);
+	if (id == 1)
+	{
+		const std::string t(text); const size_t a = t.find('\t'), b = a == std::string::npos ? a : t.find('\t', a + 1);
+		if (b == std::string::npos) return;
+		ps2xfeed::zeilen.push_back({t.substr(0, a), t.substr(a + 1, b - a - 1), std::atoi(t.c_str() + b + 1), ps2xosd::jetztMs()});
+		if (ps2xfeed::zeilen.size() > 6) ps2xfeed::zeilen.erase(ps2xfeed::zeilen.begin());
+	}
+	else if (id == 3)   // Online+ profile from the server: "xp\tkills\thits"
+	{
+		long long x = 0, k = 0, h = 0;
+		if (std::sscanf(text, "%lld\t%lld\t%lld", &x, &k, &h) == 3) { ps2xfeed::m.unlock(); ps2xstats::abgleich(x, k, h); ps2xfeed::m.lock(); }
+	}
+	else if (id == 4)   // Online+ in-game server browser: server chosen -> remember it like the overlay browser does
+	{
+		ps2xfeed::m.unlock();
+		{ std::lock_guard<std::mutex> lk(ps2xmenu::m); ps2xmenu::cfg.onlineServer = text; }
+		ps2xmenu::save();
+		ps2xfeed::m.lock();
+	}
+	else if (id == 2) { ps2xfeed::tafel = text; if (*text) ps2xfeed::tafelMs.store(ps2xosd::jetztMs()); else ps2xfeed::tafelMs.store(0); }
+}
 PS2XGS_API void ps2xgs_online_status(const char* text)
 {
 	std::lock_guard<std::mutex> lk(ps2xmenu::online::om);
 	ps2xmenu::online::spielStatus = text ? text : "";
 }
-// Spielmenue offen? Der Port pausiert dann das Spiel (EE) am naechsten VBlank.
+// Game menu open? The port then pauses the game (EE) at the next VBlank.
 PS2XGS_API int ps2xgs_menu_open()
 {
 	return ps2xmenu::open.load() ? 1 : 0;
 }
-// Vibration vom Spiel: kleiner Motor (an/aus) und grosser Motor (0..255), wie DualShock 2
+// Vibration from the game: small motor (on/off) and large motor (0..255), as on the DualShock 2
 PS2XGS_API void ps2xgs_rumble(int small_on, int large)
 {
 	const u32 lo = small_on ? 0xFFFFu : 0u;
