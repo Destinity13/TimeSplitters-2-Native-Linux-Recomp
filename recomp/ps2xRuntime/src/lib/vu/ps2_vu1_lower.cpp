@@ -6,6 +6,7 @@
 #define normalizeOperand(v) vu1NormalizeOperandInline(v)
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -29,6 +30,29 @@ namespace
         for (int index = 6; index >= 0; --index)
             polynomial = coefficients[index] + squared * polynomial;
         return quarterPi + value * polynomial;
+    }
+
+    // EATAN on the hardware: arctan(x) = pi/4 + arctan(t) with t = (x - 1) / (x + 1); the series (vuEatan) is only
+    // evaluated for t. PCSX2's recompiler (microVU) does exactly this, its interpreter feeds x itself into the series -
+    // we had copied the interpreter. PS2X_VU_EATAN_RAW=1 restores the old behaviour for comparisons.
+
+    // EFU reciprocals (ERCPR, ERLENG, ERSADD, ERSQRT): a division by zero yields the largest float with the sign of the
+    // divisor, like the divider of the hardware and PCSX2's microVU - not zero. Square roots take the absolute value.
+    float vuEfuReciprocal(float value)
+    {
+        static const bool raw = [] { const char *e = std::getenv("PS2X_VU_EATAN_RAW"); return e && *e == '1'; }();
+        if (value != 0.0f) return 1.0f / value;
+        return raw ? value : std::copysign(std::numeric_limits<float>::max(), value);
+    }
+
+    float vuEatanRatio(float numerator, float denominator)
+    {
+        static const bool raw = [] { const char *e = std::getenv("PS2X_VU_EATAN_RAW"); return e && *e == '1'; }();
+        if (raw)
+            return vuEatan(denominator != 0.0f ? numerator / denominator : 0.0f);   // callers pass (y, x) in this mode
+        const float sum = numerator + denominator, diff = numerator - denominator;
+        const float t = sum != 0.0f ? diff / sum : std::copysign(std::numeric_limits<float>::max(), diff);
+        return vuEatan(t);
     }
 
     float vuEsin(float value)
@@ -668,6 +692,11 @@ void VU1Interpreter::execLower(uint32_t instr, uint8_t *vuData, uint32_t dataSiz
             case 0x6C: // XGKICK - send GIF packet from VU1 data memory
                 startXgkick(static_cast<uint32_t>(static_cast<uint16_t>(m_state.vi[viS])));
                 return;
+            // Opcode map of the EFU group (lower special, index = (instr & 3) | ((instr >> 4) & 0x7C)), as on the hardware
+            // and in PCSX2 (VUops.cpp, LowerOP_T3_xx): 0x78 ESQRT, 0x79 ERSQRT, 0x7A ERCPR, 0x7B WAITP, 0x7C ESIN,
+            // 0x7D EATAN, 0x7E EEXP; 0x77 does not exist. Until 14 Nov 2026 ERSQRT sat on 0x77, ESIN on 0x79, EATAN on
+            // 0x7C and EEXP on 0x7D: TimeSplitters 2 rotates its particle sprites with ESIN (0x7C) and got an arctangent
+            // instead - sprites thousands of pixels large (impact smoke as a flat grey patch, pulsing white haze in the snow).
             case 0x70: // ESADD
             {
                 const float x = normalizeOperand(m_state.vf[vfS][0]);
@@ -682,7 +711,7 @@ void VU1Interpreter::execLower(uint32_t instr, uint8_t *vuData, uint32_t dataSiz
                 const float y = normalizeOperand(m_state.vf[vfS][1]);
                 const float z = normalizeOperand(m_state.vf[vfS][2]);
                 const float sum = x * x + y * y + z * z;
-                queueP(sum != 0.0f ? 1.0f / sum : sum, 18u);
+                queueP(vuEfuReciprocal(sum), 18u);
                 return;
             }
             case 0x72: // ELENG
@@ -699,21 +728,21 @@ void VU1Interpreter::execLower(uint32_t instr, uint8_t *vuData, uint32_t dataSiz
                 const float y = normalizeOperand(m_state.vf[vfS][1]);
                 const float z = normalizeOperand(m_state.vf[vfS][2]);
                 const float len = std::sqrt(x * x + y * y + z * z);
-                queueP(len != 0.0f ? 1.0f / len : len, 24u);
+                queueP(vuEfuReciprocal(len), 24u);
                 return;
             }
             case 0x74: // EATANxy
             {
                 const float x = normalizeOperand(m_state.vf[vfS][0]);
                 const float y = normalizeOperand(m_state.vf[vfS][1]);
-                queueP(x != 0.0f ? vuEatan(y / x) : 0.0f, 54u);
+                queueP(vuEatanRatio(y, x), 54u);
                 return;
             }
             case 0x75: // EATANxz
             {
                 const float x = normalizeOperand(m_state.vf[vfS][0]);
                 const float z = normalizeOperand(m_state.vf[vfS][2]);
-                queueP(x != 0.0f ? vuEatan(z / x) : 0.0f, 54u);
+                queueP(vuEatanRatio(z, x), 54u);
                 return;
             }
             case 0x76: // ESUM
@@ -724,28 +753,21 @@ void VU1Interpreter::execLower(uint32_t instr, uint8_t *vuData, uint32_t dataSiz
                 queueP(sum, 12u);
                 return;
             }
-            case 0x77: // ERSQRT
+            case 0x79: // ERSQRT
             {
                 const uint32_t component = (instr >> 21) & 3u;
                 const float value = normalizeOperand(m_state.vf[vfS][component]);
-                float result = value;
-                if (result >= 0.0f)
-                {
-                    result = std::sqrt(result);
-                    if (result != 0.0f)
-                        result = 1.0f / result;
-                }
-                queueP(result, 18u);
+                queueP(vuEfuReciprocal(std::sqrt(std::fabs(value))), 18u);   // 1 / sqrt(|x|)
                 return;
             }
             case 0x78: // ESQRT
             {
                 const uint32_t component = (instr >> 21) & 3u;
                 const float value = normalizeOperand(m_state.vf[vfS][component]);
-                queueP(value >= 0.0f ? std::sqrt(value) : value, 12u);
+                queueP(std::sqrt(std::fabs(value)), 12u);   // sqrt(|x|)
                 return;
             }
-            case 0x79: // ESIN
+            case 0x7C: // ESIN
             {
                 const uint32_t component = (instr >> 21) & 3u;
                 const float value = normalizeOperand(m_state.vf[vfS][component]);
@@ -756,18 +778,18 @@ void VU1Interpreter::execLower(uint32_t instr, uint8_t *vuData, uint32_t dataSiz
             {
                 const uint32_t component = (instr >> 21) & 3u;
                 const float value = normalizeOperand(m_state.vf[vfS][component]);
-                queueP(value != 0.0f ? 1.0f / value : value, 12u);
+                queueP(vuEfuReciprocal(value), 12u);
                 return;
             }
             case 0x7B: // WAITP
                 return;
-            case 0x7C: // EATAN
+            case 0x7D: // EATAN
             {
                 const uint32_t component = (instr >> 21) & 3u;
-                queueP(vuEatan(normalizeOperand(m_state.vf[vfS][component])), 54u);
+                queueP(vuEatanRatio(normalizeOperand(m_state.vf[vfS][component]), 1.0f), 54u);
                 return;
             }
-            case 0x7D: // EEXP
+            case 0x7E: // EEXP
             {
                 const uint32_t component = (instr >> 21) & 3u;
                 queueP(vuEexp(normalizeOperand(m_state.vf[vfS][component])), 44u);

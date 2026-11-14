@@ -1544,7 +1544,7 @@ namespace ps2xmenu
 
 	struct Cfg
 	{
-		int upscale = 4, aspect = 4, cas = 1, casSharp = 25, tv = 0, filter = 2, aniso = 16, dither = 0;
+		int upscale = 9 /* auto: fits the screen, steps down when the PC cannot hold the frame rate */, aspect = 4, cas = 1, casSharp = 25, tv = 0, filter = 2, aniso = 16, dither = 0;
 		int sbB = 50, sbC = 50, sbS = 50, rumblePct = 100, hz = 50, volume = 100, camBlur = 1, nachzieh = 0;
 		bool fxaa = false, shadeboost = false, fullscreen = false, showFps = false, rumble = true, vsync = false, startMenu = false;   // start menu: the launcher already did the setup
 		int tri = 2;             // Trilinear filtering: 0 automatic (PCSX2 default), 1 as PS2, 2 forced (uses the mipmaps of replacement textures)
@@ -4386,7 +4386,7 @@ namespace ps2xdiag
 		_set_invalid_parameter_handler(beiParameter);
 		std::set_terminate(beiTerminate);
 		AddVectoredExceptionHandler(1, beiAusnahme);
-		zeile("[ps2xgs] Diagnose aktiv");
+		zeile("[ps2xgs] diagnostics on");
 	}
 }
 #define PS2XDIAG(text) ps2xdiag::zeile(text)
@@ -4408,14 +4408,14 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 #ifdef _WIN32
 	if (!ps2xdiag::s_log.empty()) Log::SetFileOutputLevel(LOGLEVEL_DEBUG, ps2xdiag::s_log + ".pcsx2");
 #endif
-	PS2XDIAG("[ps2xgs] start: Konsole");
+	PS2XDIAG("[ps2xgs] start: console");
 	if (!GSRunner::InitializeConfig())
 	{
 		Console.Error("ps2xgs: configuration failed");
-		PS2XDIAG("[ps2xgs] start: Konfiguration fehlgeschlagen");
+		PS2XDIAG("[ps2xgs] start: configuration failed");
 		return 0;
 	}
-	PS2XDIAG("[ps2xgs] start: Konfiguration ok");
+	PS2XDIAG("[ps2xgs] start: configuration ok");
 	// PS2XGS_SURFACELESS=1 (Testlaeufe): ohne sichtbares Fenster rendern, Screenshots gehen trotzdem
 	const char *surfaceless = std::getenv("PS2XGS_SURFACELESS");
 	ps2xmenu::load(upscale);
@@ -4424,14 +4424,14 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		if (ps2xmenu::cfg.fullscreen)
 			ps2x_setenv("PS2XGS_FULLSCREEN", "1", 0);
 	}
-	PS2XDIAG("[ps2xgs] start: Menue-Einstellungen geladen");
+	PS2XDIAG("[ps2xgs] start: menu settings loaded");
 	if (!(surfaceless && *surfaceless && *surfaceless != '0') && !GSRunner::CreatePlatformWindow())
 	{
 		Console.Error("ps2xgs: creating the window failed");
-		PS2XDIAG("[ps2xgs] start: Fenster fehlgeschlagen");
+		PS2XDIAG("[ps2xgs] start: window failed");
 		return 0;
 	}
-	PS2XDIAG("[ps2xgs] start: Fenster ok");
+	PS2XDIAG("[ps2xgs] start: window ok");
 	GSRunner::SettingsOverride();
 	// The port paces itself (VBlank 50 Hz) -> no limiter of its own, no VSync wait in the GS (V-Sync optional in the menu)
 	s_settings_interface.SetBoolValue("EmuCore/GS", "FrameLimitEnable", false);
@@ -4529,12 +4529,12 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpDirectTextures", true);
 		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpPaletteTextures", true);
 		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpTexturesWithFMVActive", false);
-		Console.WriteLn(fmt::format("[ps2xgs] HD textures: {}{}", tex, d ? " (Auslesen aktiv)" : ""));
+		Console.WriteLn(fmt::format("[ps2xgs] HD textures: {}{}", tex, d ? " (dumping on)" : ""));
 	}
 
 	s_ps2x_params.filename = live_path; // ends in ps2x_live.gs -> GSDumpReplayer live mode
 	s_ps2x_cpu_thread = std::thread(CPUThreadMain, &s_ps2x_params, &s_ps2x_ret);
-	PS2XDIAG("[ps2xgs] start: CPU-Thread gestartet");
+	PS2XDIAG("[ps2xgs] start: CPU thread started");
 	s_ps2x_pump_thread = std::thread([] { GSRunner::PumpPlatformMessages(true); });
 	// Wait until the VM (incl. SPU2) is ready: the port writes SPU2 registers right afterwards (sound driver start)
 	// up to 30 s: on some drivers Vulkan first builds pipeline/shader caches on the first start
