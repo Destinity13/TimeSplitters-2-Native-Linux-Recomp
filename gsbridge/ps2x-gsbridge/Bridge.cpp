@@ -388,8 +388,10 @@ void Host::OnGameChanged(const std::string& title, const std::string& elf_overri
 {
 }
 
+namespace ps2xmenu { void autoWaechter(float vps); }
 void Host::OnPerformanceMetricsUpdated()
 {
+	ps2xmenu::autoWaechter(PerformanceMetrics::GetFPS());
 	// PS2XGS_PERFLOG=1: log the real game frame rate (as in the FPS display) and VBlanks/s
 	static const bool perflog = std::getenv("PS2XGS_PERFLOG") != nullptr;
 	if (perflog)
@@ -1903,6 +1905,7 @@ namespace ps2xmenu
 	// Internal resolution "auto" (9): about 1.5x the window height -> supersampling (smooth edges, sharp textures; better
 	// than FXAA in the comparison aa720). 1080p -> 4x, 1440p -> 5x, 4K -> 6x (cap: 8x at 4K is too much for mid GPUs).
 	std::atomic<int> autoStufe{0};
+	std::atomic<int> autoAbzug{0};   // steps the frame rate guard took off the "auto" scale in this session
 	int autoAufloesung()
 	{
 		const u32 h = s_wi.surface_height ? s_wi.surface_height : 1080u;
@@ -1916,7 +1919,35 @@ namespace ps2xmenu
 #endif
 		}();
 		if (deck) return 2;
-		return std::clamp(static_cast<int>((h * 3u + 2u * 448u - 1u) / (2u * 448u)), 2, 6);
+		return std::clamp(std::clamp(static_cast<int>((h * 3u + 2u * 448u - 1u) / (2u * 448u)), 2, 6) - autoAbzug.load(), 2, 6);
+	}
+	// Frame rate guard for the "auto" resolution: if the game stays clearly below its normal rate for 10 seconds (GPU too
+	// weak for the supersampling), auto goes down one step (not below 2x) and stays there for this session. A fixed
+	// resolution chosen by the player is never touched. PS2XGS_AUTOGUARD_TEST=<vps> feeds a rate for test runs.
+	void autoWaechter(float vps)
+	{
+		static const float testVps = [] { const char* e = std::getenv("PS2XGS_AUTOGUARD_TEST"); return e ? static_cast<float>(std::atof(e)) : 0.f; }();
+		static const auto t0 = std::chrono::steady_clock::now();
+		static double schlechtSeit = -1.0, letzte = -1000.0; static float beste = 0.f;
+		const double jetzt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		int u; { std::lock_guard<std::mutex> lk(m); u = cfg.upscale; }
+		if (u != 9 || autoStufe.load() <= 2 || open.load() || ps2xhot::turbo.load() || jetzt < 25.0) { schlechtSeit = -1.0; return; }
+		if (testVps > 0.f) { vps = testVps; beste = std::max(beste, 60.f); }
+		// nominal rate: the game runs at 50 (PAL) or 60 (NTSC) VBlanks per second; short catch-up bursts above that do not count
+		// (taken over only after 6 measurements in a row at that rate)
+		{
+			static int n60 = 0, n50 = 0;
+			n60 = std::fabs(vps - 60.f) < 1.5f ? n60 + 1 : 0; n50 = std::fabs(vps - 50.f) < 1.5f ? n50 + 1 : 0;
+			if (n60 >= 6) beste = 60.f; else if (n50 >= 6) beste = 50.f;
+		}
+		if (beste < 45.f || vps <= 1.f || vps >= 0.88f * beste) { schlechtSeit = -1.0; return; }
+		if (schlechtSeit < 0.0) { schlechtSeit = jetzt; return; }
+		if (jetzt - schlechtSeit < 10.0 || jetzt - letzte < 20.0) return;
+		letzte = jetzt; schlechtSeit = -1.0;
+		const int neu = autoAbzug.fetch_add(1) + 1;
+		Console.WriteLn(fmt::format("[ps2xmenu] frame rate guard: {:.1f} of {:.1f} per second for 10 s - auto resolution one step down ({}x -> {}x)", vps, beste, autoStufe.load(), autoAufloesung()));
+		(void)neu;
+		applyPending.store(true);
 	}
 	// window size changed (fullscreen, resize): with "auto" re-apply the settings when the level changes
 	void fensterGroesse()
