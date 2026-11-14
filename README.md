@@ -33,7 +33,7 @@
 
 <table>
 <tr>
-<td width="50%" valign="top"><a href="news/2026-11-14-bug-fixes-and-updates.md"><img src="news/img/smoke-before-after.jpg" width="100%" alt=""></a><br><sub>2026-11-14 · Update</sub><br><b><a href="news/2026-11-14-bug-fixes-and-updates.md">Bug fixes and updates - 1.1 is on the way</a></b><br><sub>Thanks for the reports! The German launcher on Windows, the black bars, the grey smoke wall and a lobby freeze are fixed. The update goes up as soon as the last round of testing is through.</sub></td>
+<td width="50%" valign="top"><a href="news/2026-11-14-bug-fixes-and-updates.md"><img src="news/img/smoke-before-after.jpg" width="100%" alt=""></a><br><sub>2026-11-14 · Update</sub><br><b><a href="news/2026-11-14-bug-fixes-and-updates.md">Bug fixes and updates - 1.1 is on the way</a></b><br><sub>Everything since 1.0.1 in one list. The German launcher on Windows, the black bars and the grey smoke wall are fixed, and there is a new launcher, mouse aiming, Online+, texture packs and more. Sorry for the German!</sub></td>
 <td width="50%" valign="top"><a href="news/2026-11-13-whats-new-1-1.md"><img src="news/img/story-siberia.jpg" width="100%" alt=""></a><br><sub>2026-11-13 · Dev log</sub><br><b><a href="news/2026-11-13-whats-new-1-1.md">What's new in 1.1, and what's still in testing</a></b><br><sub>A new launcher with automatic updates, proper 16:9 menus and HUD, mouse aiming, a clearer sniper scope and online play. Here's what's done and what's still being tested.</sub></td>
 </tr>
 </table>
