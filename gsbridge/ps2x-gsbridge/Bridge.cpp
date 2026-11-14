@@ -1879,8 +1879,14 @@ namespace ps2xmenu
 				if (e.is_regular_file(ec) && !e.is_symlink(ec)) { if (!any) { std::filesystem::create_directories(alt, ec); any = true; } std::filesystem::rename(e.path(), alt / e.path().filename(), ec); }
 			std::ofstream(marker.string()) << "This folder is managed by the game menu (Textures) - it only holds links to the texture sources.\n";
 		}
-		for (const auto& e : std::filesystem::directory_iterator(dst, ec))
-			if (e.is_symlink(ec)) std::filesystem::remove(e.path(), ec);
+		// Everything in the managed folder is a link (Linux) or a hard link/copy (Windows, where links need extra rights):
+		// clear it all except the marker, otherwise textures of a switched-off pack would stay active on Windows.
+		{
+			std::vector<std::filesystem::path> weg;
+			for (const auto& e : std::filesystem::directory_iterator(dst, ec))
+				if (e.path().filename() != ".verwaltet" && (e.is_symlink(ec) || e.is_regular_file(ec))) weg.push_back(e.path());
+			for (const auto& w : weg) std::filesystem::remove(w, ec);
+		}
 		unsigned n = 0;
 		const auto q = std::filesystem::path(quellenDir());
 		std::string pk; bool hd; { std::lock_guard<std::mutex> lk(m); pk = cfg.packs; hd = cfg.hdText; }
