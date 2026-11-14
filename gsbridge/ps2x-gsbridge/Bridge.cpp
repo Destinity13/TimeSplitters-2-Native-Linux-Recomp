@@ -2731,7 +2731,8 @@ static const int kBotSetsN = 9;
 		{ std::lock_guard<std::mutex> lk(m); c = cfg; }
 		const Cfg before = c;
 		bool closeReq = false, quitReq = false;
-		sprache.store(c.lang < 0 ? spracheAuto() : c.lang);
+		// TS2 packages: English (US) is the default for everything; German only when chosen. Other games keep "auto".
+		sprache.store(c.lang < 0 ? (std::strcmp(cfgName(), "ts2-recomp") == 0 ? 0 : spracheAuto()) : c.lang);
 
 		if (s_hubModus)
 		{
@@ -3214,6 +3215,38 @@ static const int kBotSetsN = 9;
 #ifndef _WIN32
 #include <X11/keysym.h>
 #include <X11/XKBlib.h>
+#include <dlfcn.h>
+// Raw mouse input on X11 / XWayland (XInput2 raw motion): unaccelerated counts straight from the device, like raw input
+// on Windows. libXi is loaded at run time, so the bridge needs neither its headers nor a link dependency. Without it
+// (or with PS2XGS_RAWMOUSE=0) the pointer position is used as before.
+namespace ps2xraw
+{
+	struct XIEventMaskT { int deviceid; int mask_len; unsigned char* mask; };
+	struct XIValuatorStateT { int mask_len; unsigned char* mask; double* values; };
+	struct XIRawEventT { int type; unsigned long serial; Bool send_event; Display* display; int extension; int evtype; Time time;
+		int deviceid; int sourceid; int detail; int flags; XIValuatorStateT valuators; double* raw_values; };
+	static int opcode = -1; static bool aktiv = false; static double restX = 0.0, restY = 0.0;
+	static bool init(Display* d)
+	{
+		if (const char* e = std::getenv("PS2XGS_RAWMOUSE"); e && *e == '0') return false;
+		int ev = 0, err = 0;
+		if (!XQueryExtension(d, "XInputExtension", &opcode, &ev, &err)) return false;
+		void* lib = dlopen("libXi.so.6", RTLD_NOW | RTLD_GLOBAL);
+		if (!lib) return false;
+		auto query = reinterpret_cast<int (*)(Display*, int*, int*)>(dlsym(lib, "XIQueryVersion"));
+		auto select = reinterpret_cast<int (*)(Display*, Window, XIEventMaskT*, int)>(dlsym(lib, "XISelectEvents"));
+		if (!query || !select) return false;
+		int major = 2, minor = 0;
+		if (query(d, &major, &minor) != 0) return false;
+		unsigned char mask[4] = {0, 0, 0, 0};
+		mask[17 >> 3] |= static_cast<unsigned char>(1u << (17 & 7));   // XI_RawMotion
+		XIEventMaskT m{1 /* XIAllMasterDevices */, static_cast<int>(sizeof(mask)), mask};
+		if (select(d, DefaultRootWindow(d), &m, 1) != 0) return false;
+		XFlush(d);
+		Console.WriteLn("[ps2x] mouse: raw input (XInput2)");
+		return true;
+	}
+}
 #endif
 namespace ps2xin
 {
@@ -4067,6 +4100,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 
 	do
 	{
+		{ static bool einmal = false; if (!einmal) { einmal = true; ps2xraw::aktiv = ps2xraw::init(s_display); } }
 		while (XPending(s_display) > 0)
 		{
 			XEvent event;
@@ -4105,6 +4139,24 @@ void GSRunner::PumpPlatformMessages(bool forever)
 					ps2xKey(ks, down, (event.xkey.state & Mod1Mask) != 0);
 					break;
 				}
+				case GenericEvent:
+					if (ps2xraw::aktiv && event.xcookie.extension == ps2xraw::opcode && XGetEventData(s_display, &event.xcookie))
+					{
+						if (event.xcookie.evtype == 17 && ps2xin::mausGefangen.load())
+						{
+							const auto* re = static_cast<const ps2xraw::XIRawEventT*>(event.xcookie.data);
+							const double* v = re->raw_values; double dx = 0.0, dy = 0.0;
+							for (int i = 0; i < re->valuators.mask_len * 8 && i < 2; ++i)
+								if (re->valuators.mask[i >> 3] & (1u << (i & 7))) { if (i == 0) dx = *v; else dy = *v; ++v; }
+							ps2xraw::restX += dx; ps2xraw::restY += dy;
+							const int ix = static_cast<int>(ps2xraw::restX), iy = static_cast<int>(ps2xraw::restY);
+							ps2xraw::restX -= ix; ps2xraw::restY -= iy;
+							if (ix) ps2xin::mausDX.fetch_add(ix);
+							if (iy) ps2xin::mausDY.fetch_add(iy);
+						}
+						XFreeEventData(s_display, &event.xcookie);
+					}
+					break;
 				case MotionNotify:
 					ps2xmenu::mouseX.store(event.xmotion.x);
 					ps2xmenu::mouseY.store(event.xmotion.y);
@@ -4118,7 +4170,7 @@ void GSRunner::PumpPlatformMessages(bool forever)
 						const int cx = w / 2, cy = h / 2, x = event.xmotion.x, y = event.xmotion.y;
 						if (s_warp > 0 && x == cx && y == cy) { s_warp = 0; s_lx = cx; s_ly = cy; break; }
 						if (s_warp > 0 && --s_warp == 0) { /* warp did not arrive */ }
-						if (s_lx >= 0 && ps2xin::mausNeu.exchange(false) == false)
+						if (s_lx >= 0 && ps2xin::mausNeu.exchange(false) == false && !ps2xraw::aktiv)
 						{
 							ps2xin::mausDX.fetch_add(x - s_lx); ps2xin::mausDY.fetch_add(y - s_ly);
 						}
@@ -4416,7 +4468,8 @@ PS2XGS_API int ps2xgs_start(const char* live_path, int renderer, float upscale, 
 			const size_t eq = kv.find('=');
 			if (eq == std::string_view::npos) continue;
 			const std::string k(kv.substr(0, eq)), v(kv.substr(eq + 1));
-			if (v.find('.') != std::string::npos) s_settings_interface.SetFloatValue("EmuCore/GS", k.c_str(), std::strtof(v.c_str(), nullptr));
+			if (!v.empty() && v[0] == '/') s_settings_interface.SetStringValue("EmuCore/GS", k.c_str(), v.c_str());   // paths (dump directories)
+			else if (v.find('.') != std::string::npos) s_settings_interface.SetFloatValue("EmuCore/GS", k.c_str(), std::strtof(v.c_str(), nullptr));
 			else s_settings_interface.SetIntValue("EmuCore/GS", k.c_str(), std::atoi(v.c_str()));
 			if (k.rfind("UserHacks_", 0) == 0) s_settings_interface.SetBoolValue("EmuCore/GS", "UserHacks", true);
 			Console.WriteLn(fmt::format("[ps2xgs] GS-Option {} = {}", k, v));
@@ -4590,14 +4643,18 @@ PS2XGS_API int ps2xgs_pad(unsigned short* pressed, unsigned char* axes4)
 		else
 			for (int i = 0; i < ps2xmenu::kAnzAktionen; ++i)
 				if (ps2xin::impulse[i].load() > 0) { ps2xin::impulse[i].fetch_sub(1); s_akt = i; s_halten = 6; break; }
-		if (s_halten > 0 && s_akt >= 0 && ps2xmenu::kAktionen[s_akt].wirkung == ps2xmenu::W_TASTE) b |= ps2xmenu::kAktionen[s_akt].wert;
-		// Zoom (hold): D-pad up while held; on release down for the same time (back to normal)
-		static int s_zoom = 0, s_zurueck = 0;
-		if (ps2xin::zoomGehalten()) { b |= ps2xin::UP; if (s_zoom < 240) ++s_zoom; s_zurueck = 0; }
-		else if (s_zoom > 0) { s_zurueck = s_zoom; s_zoom = 0; }
-		if (s_zurueck > 0) { b |= ps2xin::DOWN; --s_zurueck; }
-		// Aim mode (L2) only while zooming (like sights/ADS in PC shooters): otherwise full walking speed
-		const bool za = s_zoom > 0 || s_zurueck > 0;
+		// Zoom (hold) works like the aim button of the original: it brings up the scope at the zoom level the game
+		// remembers (the first press shows the first level - checked against PCSX2, build/ref789). The zoom level itself is
+		// changed with the mouse wheel while the zoom key is held (D-pad up/down in the original); without the zoom key the
+		// wheel changes the weapon as before. Before, holding the key also held D-pad up, which zoomed in right away.
+		const bool zh = ps2xin::zoomGehalten();
+		if (s_halten > 0 && s_akt >= 0 && ps2xmenu::kAktionen[s_akt].wirkung == ps2xmenu::W_TASTE)
+		{
+			u32 w = ps2xmenu::kAktionen[s_akt].wert;
+			if (zh && w == ps2xin::RIGHT) w = ps2xin::UP; else if (zh && w == ps2xin::LEFT) w = ps2xin::DOWN;
+			b |= w;
+		}
+		const bool za = zh;
 		ps2xosd::zoomAktiv.store(za);
 		if (za) b |= ps2xin::L2;
 	}
