@@ -1422,7 +1422,7 @@ namespace ps2xmenu
 	{
 		if (sprache.load() != 1) return en;
 		static const std::unordered_map<std::string_view, const char*> de = {
-			{"Settings", "Einstellungen"}, {"Saving works in the game as on the PS2.", "Gespeichert wird im Spiel wie auf der PS2."}, {"Saving works in the game as on the PS2 (profile, options and progress).", "Gespeichert wird im Spiel wie auf der PS2 (Profil, Optionen und Fortschritt)."}, {"Display", "Anzeige"}, {"Picture", "Bild"}, {"Audio", "Ton"}, {"Controls", "Steuerung"},
+			{"Settings", "Einstellungen"}, {"Gamepad", "Gamepad"}, {"Modern aiming (right stick turns the view, crosshair fixed in the centre)", "Modernes Zielen (rechter Stick dreht die Sicht, Fadenkreuz fest in der Mitte)"}, {"Off = the original PS2 controls. On: no auto-aim, L2 zooms, shots land on the crosshair.", "Aus = die Original-PS2-Steuerung. An: kein Auto-Aim, L2 zoomt, Schuesse treffen das Fadenkreuz."}, {"Unlock everything (levels, characters, cheats)", "Alles freischalten (Level, Charaktere, Cheats)"}, {"Only while this is on. Your own progress and save data stay untouched.", "Nur solange dies an ist. Eigener Fortschritt und Spielstand bleiben unveraendert."}, {"Saving works in the game as on the PS2.", "Gespeichert wird im Spiel wie auf der PS2."}, {"Saving works in the game as on the PS2 (profile, options and progress).", "Gespeichert wird im Spiel wie auf der PS2 (Profil, Optionen und Fortschritt)."}, {"Display", "Anzeige"}, {"Picture", "Bild"}, {"Audio", "Ton"}, {"Controls", "Steuerung"},
 			{"Textures", "Texturen"}, {"Online", "Online"}, {"Save data", "Speicherstand"}, {"Language", "Sprache"},
 			{"Preset", "Voreinstellung"}, {"Remaster (sharp)", "Remaster (scharf)"}, {"Original look", "Original-Look"}, {"Performance", "Leistung"},
 			{"Internal resolution", "Interne Aufloesung"}, {"Aspect ratio", "Bildformat"}, {"Takes full effect after the next area change or restart.", "Wirkt ab dem naechsten Bereichswechsel bzw. Neustart voll."},
@@ -1564,6 +1564,8 @@ namespace ps2xmenu
 		int impactAnsage = 1;   // multi-kill / streak announcer
 		int impactRand = 1;     // red screen edge when hit
 		int fadenkreuz = 0;      // own crosshair when playing with the mouse: 0 cross, 1 dot, 2 circle, 3 off
+		int padModern = 0;       // TS2: modern gamepad aiming (right stick turns the view, crosshair fixed in the centre)
+		int unlockAll = 0;       // TS2: everything unlocked while the option is on (levels, characters, cheats)
 		int nickMax = 40;        // Mouse: how far up/down you can look (degrees, original 40)
 		int bel[32][2] = {};     // bindings per action (2 keys), defaults in kAktionen
 		int belVersion = 0;      // version of the saved bindings (0 = none saved)
@@ -1608,7 +1610,7 @@ namespace ps2xmenu
 		{"nachzieheffekt", "motion_trail"}, {"maus_zielen", "mouse_aim"}, {"maus_empfindlichkeit", "mouse_sensitivity"},
 		{"maus_invertiert", "mouse_invert"}, {"maus_zielmodus_dauer", "aim_mode_hold"}, {"sprache", "language"},
 		{"eingabeanzeige", "show_input"}, {"zoom_empfindlichkeit", "zoom_sensitivity"}, {"belegung_version", "bindings_version"},
-		{"effekte", "effects"}, {"fadenkreuz", "crosshair"}, {"zielfernrohr", "scope"}, {"online_plus_effekte", "impact_effects"}, {"schaden_stoss", "damage_kick"}, {"treffermarker", "hit_markers"}, {"treffer_klang", "hit_sound"}, {"blickwinkel_max", "pitch_limit"}, {"texturpakete", "texture_packs"}, {"online_passwort", "online_password"}, {"online_favoriten", "online_favorites"}};
+		{"effekte", "effects"}, {"alles_frei", "unlock_all"}, {"pad_modern", "modern_gamepad_aim"}, {"fadenkreuz", "crosshair"}, {"zielfernrohr", "scope"}, {"online_plus_effekte", "impact_effects"}, {"schaden_stoss", "damage_kick"}, {"treffermarker", "hit_markers"}, {"treffer_klang", "hit_sound"}, {"blickwinkel_max", "pitch_limit"}, {"texturpakete", "texture_packs"}, {"online_passwort", "online_password"}, {"online_favoriten", "online_favorites"}};
 	static constexpr const char* kFxMap[][2] = {{"aus", "off"}, {"klar", "clear"}, {"filmisch", "cinematic"}};
 	// Line "key=value": translate the key (and the effects value) to the other language; nachEnglisch=false -> internal (German) names
 	std::string cfgZeile(const std::string& line, bool nachEnglisch)
@@ -1697,6 +1699,8 @@ namespace ps2xmenu
 			else if (k == "ansager") cfg.impactAnsage = v != 0 ? 1 : 0;
 			else if (k == "schaden_rand") cfg.impactRand = v != 0 ? 1 : 0;
 			else if (k == "blickwinkel_max") cfg.nickMax = std::clamp(v, 40, 85);
+			else if (k == "alles_frei") cfg.unlockAll = v != 0 ? 1 : 0;
+			else if (k == "pad_modern") cfg.padModern = v != 0 ? 1 : 0;
 			else if (k == "belegung_version") cfg.belVersion = v;
 			else if (k.rfind("taste_", 0) == 0)
 			{
@@ -1739,7 +1743,7 @@ namespace ps2xmenu
 		  << "\ncas_staerke=" << c.casSharp << "\ndithering=" << c.dither << "\ntv_shader=" << c.tv << "\nfarbe=" << c.shadeboost << "\nhelligkeit=" << c.sbB
 		  << "\nkontrast=" << c.sbC << "\nsaettigung=" << c.sbS << "\ntexturfilter=" << c.filter << "\nanisotrop=" << c.aniso
 		  << "\nvollbild=" << c.fullscreen << "\nfps_anzeige=" << c.showFps << "\nvibration=" << c.rumble
-		  << "\nvibration_staerke=" << c.rumblePct << "\nvsync=" << c.vsync << "\nbildrate=" << c.hz << "\nlautstaerke=" << c.volume << "\nkamera_unschaerfe=" << c.camBlur << "\nnachzieheffekt=" << c.nachzieh << "\nstartmenue=" << c.startMenu << "\neffekte=" << (c.fx == 1 ? "original-plus" : c.fx == 2 ? "klar" : c.fx == 3 ? "filmisch" : "aus") << "\ntrilinear=" << c.tri << "\nhd_text=" << c.hdText << "\nmaus_zielen=" << c.maus << "\nmaus_empfindlichkeit=" << c.mausSens << "\nmaus_invertiert=" << c.mausInvert << "\nmaus_zielmodus_dauer=" << c.mausZielmodus << "\nsprache=" << c.lang << "\neingabeanzeige=" << c.showInput << "\nbelegung_version=" << c.belVersion << "\nzoom_empfindlichkeit=" << c.zoomSens << "\nfadenkreuz=" << c.fadenkreuz << "\nzielfernrohr=" << c.scope << "\nonline_plus_effekte=" << c.impact << "\nschaden_stoss=" << c.impactKick << "\ntreffermarker=" << c.impactMarker << "\ntreffer_klang=" << c.impactSound << "\nrueckstoss=" << c.impactRecoil << "\nansager=" << c.impactAnsage << "\nschaden_rand=" << c.impactRand << "\nblickwinkel_max=" << c.nickMax << "\ntexturpakete=" << c.packs << "\nonline_server=" << c.onlineServer << "\nonline_name=" << c.onlineName << "\nonline_passwort=" << c.onlinePw << "\nonline_favoriten=" << c.onlineFavs << "\n";
+		  << "\nvibration_staerke=" << c.rumblePct << "\nvsync=" << c.vsync << "\nbildrate=" << c.hz << "\nlautstaerke=" << c.volume << "\nkamera_unschaerfe=" << c.camBlur << "\nnachzieheffekt=" << c.nachzieh << "\nstartmenue=" << c.startMenu << "\neffekte=" << (c.fx == 1 ? "original-plus" : c.fx == 2 ? "klar" : c.fx == 3 ? "filmisch" : "aus") << "\ntrilinear=" << c.tri << "\nhd_text=" << c.hdText << "\nmaus_zielen=" << c.maus << "\nmaus_empfindlichkeit=" << c.mausSens << "\nmaus_invertiert=" << c.mausInvert << "\nmaus_zielmodus_dauer=" << c.mausZielmodus << "\nsprache=" << c.lang << "\neingabeanzeige=" << c.showInput << "\nbelegung_version=" << c.belVersion << "\nzoom_empfindlichkeit=" << c.zoomSens << "\nfadenkreuz=" << c.fadenkreuz << "\nzielfernrohr=" << c.scope << "\nonline_plus_effekte=" << c.impact << "\nschaden_stoss=" << c.impactKick << "\ntreffermarker=" << c.impactMarker << "\ntreffer_klang=" << c.impactSound << "\nrueckstoss=" << c.impactRecoil << "\nansager=" << c.impactAnsage << "\nschaden_rand=" << c.impactRand << "\nblickwinkel_max=" << c.nickMax << "\nalles_frei=" << c.unlockAll << "\npad_modern=" << c.padModern << "\ntexturpakete=" << c.packs << "\nonline_server=" << c.onlineServer << "\nonline_name=" << c.onlineName << "\nonline_passwort=" << c.onlinePw << "\nonline_favoriten=" << c.onlineFavs << "\n";
 		for (int i = 0; i < kAnzAktionen; ++i)
 			f << "taste_" << i << "=" << c.bel[i][0] << "," << c.bel[i][1] << "   # " << kAktionen[i].name << "\n";
 		std::ofstream aus(iniPath(), std::ios::trunc);
@@ -1808,7 +1812,7 @@ namespace ps2xmenu
 		       a.aniso == b.aniso && a.dither == b.dither && a.sbB == b.sbB && a.sbC == b.sbC && a.sbS == b.sbS && a.rumblePct == b.rumblePct &&
 		       a.hz == b.hz && a.volume == b.volume && a.camBlur == b.camBlur && a.nachzieh == b.nachzieh && a.fxaa == b.fxaa && a.shadeboost == b.shadeboost &&
 		       a.fullscreen == b.fullscreen && a.showFps == b.showFps && a.rumble == b.rumble && a.vsync == b.vsync && a.startMenu == b.startMenu &&
-		       a.hdText == b.hdText && a.maus == b.maus && a.mausSens == b.mausSens && a.mausInvert == b.mausInvert && a.mausZielmodus == b.mausZielmodus && a.fadenkreuz == b.fadenkreuz && a.scope == b.scope && a.impact == b.impact && a.impactKick == b.impactKick && a.impactMarker == b.impactMarker && a.impactSound == b.impactSound && a.impactRecoil == b.impactRecoil && a.impactAnsage == b.impactAnsage && a.impactRand == b.impactRand && a.nickMax == b.nickMax && a.lang == b.lang && a.showInput == b.showInput &&
+		       a.hdText == b.hdText && a.unlockAll == b.unlockAll && a.padModern == b.padModern && a.maus == b.maus && a.mausSens == b.mausSens && a.mausInvert == b.mausInvert && a.mausZielmodus == b.mausZielmodus && a.fadenkreuz == b.fadenkreuz && a.scope == b.scope && a.impact == b.impact && a.impactKick == b.impactKick && a.impactMarker == b.impactMarker && a.impactSound == b.impactSound && a.impactRecoil == b.impactRecoil && a.impactAnsage == b.impactAnsage && a.impactRand == b.impactRand && a.nickMax == b.nickMax && a.lang == b.lang && a.showInput == b.showInput &&
 		       a.zoomSens == b.zoomSens && std::memcmp(a.bel, b.bel, sizeof(a.bel)) == 0 && a.packs == b.packs && a.fx == b.fx && a.tri == b.tri &&
 		       a.onlineServer == b.onlineServer && a.onlineName == b.onlineName && a.onlinePw == b.onlinePw && a.onlineFavs == b.onlineFavs;
 	}
@@ -2866,7 +2870,7 @@ static const int kBotSetsN = 9;
 				{ c.upscale = 4; c.aniso = 16; c.filter = 2; c.cas = 1; c.casSharp = 25; c.fxaa = false; c.tv = 0; c.shadeboost = false; c.dither = 0; c.camBlur = 1; c.nachzieh = 0; c.scope = 1; c.aspect = 4; }
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Original look")))
-				{ c.upscale = 1; c.aniso = 0; c.filter = 2; c.cas = 0; c.fxaa = false; c.tv = 5; c.shadeboost = false; c.aspect = 2; c.dither = 2; c.camBlur = 1; c.nachzieh = 1; c.scope = 0; }
+				{ c.upscale = 1; c.aniso = 0; c.filter = 2; c.cas = 0; c.fxaa = false; c.tv = 5; c.shadeboost = false; c.aspect = 2; c.dither = 2; c.camBlur = 1; c.nachzieh = 1; c.scope = 0; c.padModern = 0; c.unlockAll = 0; }
 				ImGui::SameLine();
 				if (ImGui::Button(tr("Performance")))
 				{ c.upscale = 2; c.aniso = 4; c.filter = 2; c.cas = 1; c.casSharp = 40; c.fxaa = false; c.tv = 0; }
@@ -2974,6 +2978,13 @@ static const int kBotSetsN = 9;
 						ImGui::SliderInt(tr("Look up/down limit"), &c.nickMax, 40, 85, "%d\xC2\xB0");
 					}
 					ImGui::TextDisabled("%s", tr("Click into the game to capture the mouse, ESC or F1 releases it."));
+				}
+				if (std::strcmp(cfgName(), "ts2-recomp") == 0)
+				{
+					head(tr("Gamepad"));
+					bool pm = c.padModern != 0;
+					if (ImGui::Checkbox(tr("Modern aiming (right stick turns the view, crosshair fixed in the centre)"), &pm)) c.padModern = pm ? 1 : 0;
+					ImGui::TextDisabled("%s", tr("Off = the original PS2 controls. On: no auto-aim, L2 zooms, shots land on the crosshair."));
 				}
 				head(tr("Key bindings"));
 				ImGui::TextDisabled("%s", tr("Click a field, then press a key or mouse button. Delete clears, ESC cancels."));
@@ -3106,6 +3117,13 @@ static const int kBotSetsN = 9;
 				ImGui::TextWrapped("%s", memcardInfo().c_str());
 				ImGui::TextDisabled("%s", tr(speicherHinweis()));
 				ImGui::TextDisabled("%s", tr("A backup copy of the save data is made at every start."));
+				if (std::strcmp(cfgName(), "ts2-recomp") == 0)
+				{
+					ImGui::Separator();
+					bool ua = c.unlockAll != 0;
+					if (ImGui::Checkbox(tr("Unlock everything (levels, characters, cheats)"), &ua)) c.unlockAll = ua ? 1 : 0;
+					ImGui::TextDisabled("%s", tr("Only while this is on. Your own progress and save data stay untouched."));
+				}
 				ImGui::EndTabItem();
 			}
 			ImGui::EndTabBar();
@@ -4931,6 +4949,8 @@ PS2XGS_API int ps2xgs_option(int id, int fallback)
 		case 7: return ps2xin::zoomGehalten() ? 1 : 0;
 		case 8: return ps2xhot::freecam.load() ? 1 : 0;
 		case 11: return ps2xmenu::cfg.nickMax;
+		case 31: return ps2xmenu::cfg.unlockAll;
+		case 32: return ps2xmenu::cfg.padModern;
 		case 12: return ps2xmenu::cfg.scope;
 		case 15: return ps2xmenu::onlinePlus() ? ps2xmenu::cfg.impact : 0;
 		case 16: return ps2xmenu::cfg.impactKick;
